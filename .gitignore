@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+
+# Test
+coverage/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code / MCP
+.claude/
+.serena/
+
+# DOC
+todos/
+plan/
+
+# Docker volumes
+pgdata/
+redisdata/
+
+/src/generated/prisma
