@@ -236,7 +236,7 @@ docker compose up -d
 docker compose ps
 
 # 4. 查看 app logs 確認啟動成功
-docker compose logs -f app
+docker compose logs -f server
 # 預期看到：Server listening on port 8000
 ```
 

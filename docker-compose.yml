@@ -1,7 +1,7 @@
 services:
-  app:
+  server:
     build: .
-    container_name: ptt-alertor-app
+    container_name: ptt-alertor-server
     restart: unless-stopped
     ports:
       - "${PORT:-8000}:8000"
