@@ -24,7 +24,25 @@
 | Testing | Jest 30 + ts-jest |
 | Containerization | Docker (multi-stage build) |
 
-## Quick Start
+## Prerequisites
+
+| Tool | Version | 安裝方式 |
+|------|---------|---------|
+| [Node.js](https://nodejs.org/) | 22+ | `brew install node` / [官方下載](https://nodejs.org/) |
+| [pnpm](https://pnpm.io/) | 9+ | `corepack enable && corepack prepare pnpm@latest --activate` |
+| [Docker](https://www.docker.com/) | 24+ | [Docker Desktop](https://www.docker.com/products/docker-desktop/) |
+| Telegram Bot Token | — | 從 [@BotFather](https://t.me/BotFather) 取得（見下方說明） |
+
+### 建立 Telegram Bot
+
+1. 在 Telegram 搜尋 [@BotFather](https://t.me/BotFather) 並開始對話
+2. 輸入 `/newbot`，依照指示設定 Bot 名稱和 username
+3. BotFather 會回覆一組 **Bot Token**（格式如 `123456:ABC-DEF...`），記下備用
+4. （選用）輸入 `/setcommands` 設定 Bot 指令選單
+
+## Quick Start（首次部署）
+
+### 方法一：deploy.sh（推薦）
 
 ```bash
 # 1. Clone & install
@@ -32,26 +50,49 @@ git clone <repo-url>
 cd crawler_service
 pnpm install
 
-# 2. Setup environment
+# 2. 設定環境變數
 cp .env.example .env
-# Edit .env: fill in TELEGRAM_TOKEN (required)
+# 編輯 .env，填入 TELEGRAM_TOKEN（必填）
 
-# 3. Start infrastructure
-pnpm docker:up
+# 3. 一鍵初始化（啟動 Docker → 建立 DB → 執行 migration）
+./deploy.sh init
 
-# 4. Database setup
-npx prisma migrate dev
-npx prisma generate
-
-# 5. Start development server
+# 4. 啟動開發伺服器
 pnpm server
 ```
 
-Or use the deploy script:
+### 方法二：手動步驟
 
 ```bash
-./deploy.sh init    # First-time setup (Docker + DB + migrations)
-pnpm server         # Start dev server
+# 1. Clone & install
+git clone <repo-url>
+cd crawler_service
+pnpm install
+
+# 2. 設定環境變數
+cp .env.example .env
+# 編輯 .env，填入 TELEGRAM_TOKEN（必填）
+
+# 3. 啟動 PostgreSQL + Redis
+pnpm docker:up
+
+# 4. 等待服務就緒後，執行 DB migration
+npx prisma migrate dev
+npx prisma generate
+
+# 5. 啟動開發伺服器
+pnpm server
+```
+
+### 驗證服務是否正常
+
+```bash
+# Health check
+curl http://localhost:8000/health
+# 預期回應：{"status":"ok"}
+
+# 到 Telegram 跟你的 Bot 對話，輸入 /start 註冊帳號
+# 輸入「新增 Gossiping 問卦」測試訂閱功能
 ```
 
 ## Usage (Telegram Bot)
@@ -169,34 +210,54 @@ npx prisma generate
 pnpm server
 ```
 
-### Production (Docker Compose)
+### Production（首次部署）
 
 ```bash
-# 設定環境變數
+# 1. 準備環境變數
 cp .env.example .env
-vim .env  # 填入 production 值
-
-# 一鍵啟動（app + PostgreSQL + Redis）
-docker compose up -d
-
-# 查看狀態
-docker compose ps
-
-# 查看 logs
-docker compose logs -f app
+vim .env
 ```
 
-`docker-compose.yml` 包含 health check，app 會等 PostgreSQL 和 Redis 都 ready 才啟動。
+Production `.env` 必須設定：
+
+```bash
+NODE_ENV=production
+TELEGRAM_TOKEN=<your-bot-token>
+TELEGRAM_WEBHOOK_URL=https://your-domain.com/webhook   # 公開 URL
+TELEGRAM_WEBHOOK_SECRET=<random-secret>                 # webhook 驗證
+POSTGRES_PASSWORD=<strong-password>                     # 強密碼
+```
+
+```bash
+# 2. 一鍵啟動（app + PostgreSQL + Redis）
+docker compose up -d
+
+# 3. 確認所有服務正常
+docker compose ps
+
+# 4. 查看 app logs 確認啟動成功
+docker compose logs -f app
+# 預期看到：Server listening on port 8000
+```
+
+> `docker-compose.yml` 包含 health check，app 會等 PostgreSQL 和 Redis 都 ready 才啟動。
+
+### Production（後續更新）
+
+```bash
+# 自動 git pull → 檢查 migration → rebuild → restart
+./deploy.sh update
+```
 
 ### deploy.sh
 
-```bash
-./deploy.sh init      # 首次設定：啟動 Docker → 建立 DB → 執行 migration
-./deploy.sh migrate   # 執行 Prisma migration
-./deploy.sh update    # git pull → 自動檢查 migration → rebuild → restart
-./deploy.sh stop      # 停止所有服務
-./deploy.sh status    # 查看服務狀態
-```
+| 指令 | 說明 |
+|------|------|
+| `./deploy.sh init` | 首次設定：啟動 dev Docker → 建立 DB → 執行 migration |
+| `./deploy.sh migrate` | 手動執行 Prisma migration |
+| `./deploy.sh update` | git pull → 自動檢查 migration 變更 → rebuild → restart |
+| `./deploy.sh stop` | 停止所有 Docker 服務 |
+| `./deploy.sh status` | 查看服務狀態 |
 
 ### Startup Sequence
 
