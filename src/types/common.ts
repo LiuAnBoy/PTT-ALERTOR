@@ -12,7 +12,8 @@ export type ModuleTag =
   | "WORKER"
   | "DATABASE"
   | "REDIS"
-  | "MAINTENANCE";
+  | "MAINTENANCE"
+  | "COMMAND";
 
 /**
  * Standard mutation response (POST / PUT / DELETE).

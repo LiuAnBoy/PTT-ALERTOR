@@ -1,4 +1,5 @@
 import { Queue } from "bullmq";
+import pLimit from "p-limit";
 
 import { createLogger } from "../../../core/logger";
 import { bullmqConnection } from "../../../core/queue";
@@ -16,6 +17,9 @@ import { fetchHtml } from "./htmlFetcher";
 const logger = createLogger("CRAWLER");
 
 const matcherQueue = new Queue("matcher-queue", { connection: bullmqConnection });
+
+/** Concurrency limit for PTT HTTP requests to avoid rate limiting. */
+const FETCH_CONCURRENCY = 5;
 
 /**
  * Fetch new articles from a board via HTML scraping.
@@ -47,20 +51,23 @@ export async function fetchNewArticles(boardName: string): Promise<RawArticle[]>
   // Update Redis cache
   await cacheArticles(boardName, newArticles);
 
-  // Fetch detail pages for new articles
+  // Fetch detail pages for new articles (concurrent)
   await fetchDetailsForArticles(newArticles);
 
-  // Dispatch matcher jobs for new articles
-  for (const article of newArticles) {
-    await matcherQueue.add("match", {
-      board: article.board,
-      title: article.title,
-      code: article.code,
-      author: article.author,
-      pushSum: article.pushSum,
-      link: article.link,
-    });
-  }
+  // Dispatch matcher jobs for new articles (bulk add)
+  await matcherQueue.addBulk(
+    newArticles.map((article) => ({
+      name: "match",
+      data: {
+        board: article.board,
+        title: article.title,
+        code: article.code,
+        author: article.author,
+        pushSum: article.pushSum,
+        link: article.link,
+      },
+    })),
+  );
 
   return newArticles;
 }
@@ -79,24 +86,28 @@ export async function updateActiveArticles(): Promise<number> {
     return 0;
   }
 
+  const limit = pLimit(FETCH_CONCURRENCY);
   let updated = 0;
-
   let expired = 0;
 
-  for (const article of articles) {
-    const detail = await fetchDetail(article.link);
+  await Promise.allSettled(
+    articles.map((article) =>
+      limit(async () => {
+        const detail = await fetchDetail(article.link);
 
-    if (detail === ARTICLE_DELETED) {
-      await expireArticle(article.code);
-      expired++;
-      continue;
-    }
+        if (detail === ARTICLE_DELETED) {
+          await expireArticle(article.code);
+          expired++;
+          return;
+        }
 
-    if (!detail) continue;
+        if (!detail) return;
 
-    const changed = await updateArticleDetail(article.code, detail);
-    if (changed) updated++;
-  }
+        const changed = await updateArticleDetail(article.code, detail);
+        if (changed) updated++;
+      }),
+    ),
+  );
 
   if (expired > 0) {
     logger.info(`Expired ${expired} deleted articles`);
@@ -111,25 +122,30 @@ export async function updateActiveArticles(): Promise<number> {
 }
 
 /**
- * Fetch detail pages for a batch of articles.
+ * Fetch detail pages for a batch of articles with concurrency control.
  * @param articles - Articles to fetch details for.
  */
 async function fetchDetailsForArticles(articles: RawArticle[]): Promise<void> {
+  const limit = pLimit(FETCH_CONCURRENCY);
   let fetched = 0;
 
-  for (const article of articles) {
-    const detail = await fetchDetail(article.link);
+  await Promise.allSettled(
+    articles.map((article) =>
+      limit(async () => {
+        const detail = await fetchDetail(article.link);
 
-    if (detail === ARTICLE_DELETED) {
-      await expireArticle(article.code);
-      continue;
-    }
+        if (detail === ARTICLE_DELETED) {
+          await expireArticle(article.code);
+          return;
+        }
 
-    if (!detail) continue;
+        if (!detail) return;
 
-    await updateArticleDetail(article.code, detail);
-    fetched++;
-  }
+        await updateArticleDetail(article.code, detail);
+        fetched++;
+      }),
+    ),
+  );
 
   logger.info(`Fetched details for ${fetched}/${articles.length} articles`);
 }

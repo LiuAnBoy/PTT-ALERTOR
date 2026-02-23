@@ -17,8 +17,9 @@ jest.mock("../../../core/queue", () => ({
 
 // Mock BullMQ Queue
 const mockAdd = jest.fn().mockResolvedValue({});
+const mockAddBulk = jest.fn().mockResolvedValue([]);
 jest.mock("bullmq", () => ({
-  Queue: jest.fn().mockImplementation(() => ({ add: mockAdd })),
+  Queue: jest.fn().mockImplementation(() => ({ add: mockAdd, addBulk: mockAddBulk })),
 }));
 
 jest.mock("./htmlFetcher", () => ({ fetchHtml: jest.fn() }));
@@ -136,11 +137,11 @@ describe("fetchNewArticles", () => {
     expect(mockFetchDetail).toHaveBeenCalledTimes(2);
     expect(mockFetchDetail).toHaveBeenCalledWith(newArticles[0].link);
     expect(mockFetchDetail).toHaveBeenCalledWith(newArticles[1].link);
-    // matcherQueue.add called once per new article
-    expect(mockAdd).toHaveBeenCalledTimes(2);
+    // matcherQueue.addBulk called once with all new articles
+    expect(mockAddBulk).toHaveBeenCalledTimes(1);
   });
 
-  it("should call matcherQueue.add with correct payload for each new article", async () => {
+  it("should call matcherQueue.addBulk with correct payload for new articles", async () => {
     const newArticles = [makeArticle("M.010", "Stock"), makeArticle("M.011", "Stock")];
 
     mockFetchHtml.mockResolvedValueOnce(newArticles);
@@ -150,27 +151,31 @@ describe("fetchNewArticles", () => {
 
     await fetchNewArticles("Stock");
 
-    expect(mockAdd).toHaveBeenCalledTimes(2);
-
-    // Verify first article payload
-    expect(mockAdd).toHaveBeenNthCalledWith(1, "match", {
-      board: "Stock",
-      title: newArticles[0].title,
-      code: "M.010",
-      author: "testuser",
-      pushSum: 10,
-      link: newArticles[0].link,
-    });
-
-    // Verify second article payload
-    expect(mockAdd).toHaveBeenNthCalledWith(2, "match", {
-      board: "Stock",
-      title: newArticles[1].title,
-      code: "M.011",
-      author: "testuser",
-      pushSum: 10,
-      link: newArticles[1].link,
-    });
+    expect(mockAddBulk).toHaveBeenCalledTimes(1);
+    expect(mockAddBulk).toHaveBeenCalledWith([
+      {
+        name: "match",
+        data: {
+          board: "Stock",
+          title: newArticles[0].title,
+          code: "M.010",
+          author: "testuser",
+          pushSum: 10,
+          link: newArticles[0].link,
+        },
+      },
+      {
+        name: "match",
+        data: {
+          board: "Stock",
+          title: newArticles[1].title,
+          code: "M.011",
+          author: "testuser",
+          pushSum: 10,
+          link: newArticles[1].link,
+        },
+      },
+    ]);
   });
 });
 

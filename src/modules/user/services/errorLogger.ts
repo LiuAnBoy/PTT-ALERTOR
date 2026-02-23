@@ -3,7 +3,7 @@ import type { LogLevel } from "@prisma/client";
 import { config } from "../../../core/config";
 import { createLogger } from "../../../core/logger";
 import { getPrisma } from "../../../core/prisma";
-import { getBot } from "../bot/bot";
+import { getAdapter } from "../../broadcast/registry";
 
 const logger = createLogger("BOT");
 
@@ -57,7 +57,7 @@ async function sendAlert(text: string): Promise<void> {
   if (!config.telegram.adminChatId) return;
 
   try {
-    await getBot().api.sendMessage(config.telegram.adminChatId, text);
+    await getAdapter("TELEGRAM").sendAlert(config.telegram.adminChatId, text);
   } catch (err) {
     logger.error(`Failed to send admin alert: ${(err as Error).message}`);
   }

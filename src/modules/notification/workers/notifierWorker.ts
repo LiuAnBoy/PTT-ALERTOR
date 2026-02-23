@@ -2,7 +2,7 @@ import { Worker } from "bullmq";
 
 import { createLogger } from "../../../core/logger";
 import { bullmqConnection } from "../../../core/queue";
-import type { NotificationPayload } from "../services/notifierService";
+import type { NotificationPayload } from "../../broadcast/types";
 import { sendNotification } from "../services/notifierService";
 
 const logger = createLogger("NOTIFIER");

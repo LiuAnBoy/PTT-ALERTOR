@@ -2,7 +2,8 @@
 
 ## Overview
 
-推播流程負責將匹配結果透過 Telegram Bot API 發送給使用者。具有速率限制和部分失敗容錯。
+推播流程負責將匹配結果透過各平台 adapter 發送給使用者。具有速率限制和部分失敗容錯。
+目前支援 Telegram，可透過新增 `channels/<platform>.ts` 擴充其他平台。
 
 ## Flow Diagram
 
@@ -25,13 +26,13 @@
   sendNotification(payload)
        │
        ├─── prisma.user.findUnique({ id, select: { enable, channels } })
-       │
+       │                                          (all platforms)
        ├─── if (!user || !user.enable) → return false
        │
-       ├─── formatMessage(payload) → HTML string
-       │
-       └─── for each Telegram channel:
-            bot.api.sendMessage(chatId, message, { parse_mode: "HTML" })
+       └─── for each channel:
+            getAdapter(channel.platform).sendNotification(chatId, payload)
+            │       │
+            │       └─── adapter formats message (HTML for TG, Markdown for Discord, etc.)
             │
             ├─── success → sent = true
             └─── failure → logError, continue
@@ -79,14 +80,14 @@ HTML 格式，Telegram `parse_mode: "HTML"`：
 
 ## User Lookup
 
-從 PostgreSQL 查詢 user：
+從 PostgreSQL 查詢 user 的所有 channels（不限平台）：
 
 ```typescript
 prisma.user.findUnique({
   where: { id: payload.userId },
   select: {
     enable: true,
-    channels: { where: { platform: "TELEGRAM" } },
+    channels: true,  // all platforms
   },
 });
 ```
@@ -97,13 +98,14 @@ prisma.user.findUnique({
 |------|------|
 | User 不存在 | return false |
 | `user.enable === false` | return false |
-| 無 Telegram channel | return false（channels 為空陣列）|
+| 無任何 channel | return false（channels 為空陣列）|
 
-## Multi-Channel Support
+## Multi-Channel & Multi-Platform Support
 
-一個 user 可以有多個 Telegram channel（不同群組或私訊）。
+一個 user 可以有多個 channel（不同平台或同平台不同群組）。
 
-- 遍歷所有 channel 發送
+- 遍歷所有 channel，透過 `getAdapter(channel.platform)` 取得對應 adapter
+- 每個 adapter 自行格式化訊息（Telegram 用 HTML，Discord 用 Markdown 等）
 - 部分 channel 失敗 → 其他 channel 繼續發送 → 整體視為成功
 - 全部 channel 失敗 → return false
 
@@ -120,15 +122,15 @@ prisma.user.findUnique({
 channel 發送失敗時記錄到 `crawler_logs`：
 
 ```typescript
-logError("ERROR", "NOTIFIER", "Telegram send failed", {
+logError("ERROR", "NOTIFIER", `${channel.platform} send failed`, {
   userId: payload.userId,
   channelId: channel.id,
-  telegramError: err.message,
+  error: err.message,
 });
 ```
 
 ### Admin Alert
 
-`errorLogger.ts` 中：
+`errorLogger.ts` 中透過 `getAdapter("TELEGRAM").sendAlert()` 發送：
 - **FATAL**: 立即推送到 admin Telegram
 - **ERROR**: 5 分鐘 cooldown（相同 module+message 組合）

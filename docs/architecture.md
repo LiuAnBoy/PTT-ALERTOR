@@ -17,11 +17,12 @@
               ┌──────────────────┼──────────────────┐
               │                  │                   │
      ┌────────▼────────┐  ┌─────▼──────┐  ┌────────▼────────┐
-     │   Bot Handlers  │  │  Health     │  │  Error          │
-     │  (grammy)       │  │  Check API  │  │  Middleware      │
-     └────────┬────────┘  └────────────┘  └─────────────────┘
+     │   Broadcast     │  │  Health     │  │  Error          │
+     │  (platform      │  │  Check API  │  │  Middleware      │
+     │   adapters)     │  └────────────┘  └─────────────────┘
+     └────────┬────────┘
               │
-              │ user commands
+              │ CommandContext → commandHandler → CommandResult
               ▼
      ┌─────────────────┐        ┌──────────────────┐
      │   PostgreSQL    │◄──────►│      Redis       │
@@ -88,17 +89,20 @@ src/
 │   │   └── workers/
 │   │       └── matcherWorker.ts    # Processes match jobs (concurrency: 5)
 │   │
-│   ├── notification/         # Telegram push notifications
+│   ├── broadcast/            # Multi-platform command & notification
+│   │   ├── types.ts               # CommandContext, PlatformAdapter, CommandResult
+│   │   ├── registry.ts            # Platform adapter registry
+│   │   ├── commandHandler.ts      # Shared command logic (platform-agnostic)
+│   │   └── channels/
+│   │       └── telegram.ts        # Telegram: bot setup + receive + send + format
+│   │
+│   ├── notification/         # Push notification dispatch
 │   │   ├── services/
-│   │   │   └── notifierService.ts  # Format message + send via Bot API
+│   │   │   └── notifierService.ts  # Multi-platform notification via adapter registry
 │   │   └── workers/
 │   │       └── notifierWorker.ts   # Rate-limited sender (30 msg/s)
 │   │
 │   └── user/                 # User management
-│       ├── bot/
-│       │   ├── bot.ts              # grammy Bot setup + webhook
-│       │   ├── handlers.ts         # User commands (新增/刪除/清單/幫助)
-│       │   └── adminHandlers.ts    # Admin commands (/errors)
 │       ├── repositories/
 │       │   ├── userRepository.ts
 │       │   ├── channelRepository.ts
@@ -116,6 +120,14 @@ src/
 ```
 
 ## Design Decisions
+
+### Platform Adapter Pattern
+- `broadcast/` module abstracts all platform-specific logic behind `PlatformAdapter` interface
+- Each platform is a single file in `channels/` (e.g., `telegram.ts`)
+- Platform handles: receiving messages → `CommandContext`, sending via platform API
+- Shared `commandHandler.ts` processes all commands, returns `CommandResult`
+- `notifierService.ts` dispatches to correct adapter via `getAdapter(channel.platform)`
+- To add a new platform: create `channels/<platform>.ts`, implement `PlatformAdapter`, auto-registers on import
 
 ### Singleton Pattern
 - `redis`, `prisma` (Proxy), `bot` (lazy `getBot()`) are all singletons

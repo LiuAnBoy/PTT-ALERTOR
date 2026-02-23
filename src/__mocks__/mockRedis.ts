@@ -9,6 +9,7 @@ export function createMockRedis() {
     zscore: jest.fn().mockReturnThis(),
     sadd: jest.fn().mockReturnThis(),
     srem: jest.fn().mockReturnThis(),
+    smembers: jest.fn().mockReturnThis(),
     del: jest.fn().mockReturnThis(),
   };
 
@@ -18,6 +19,7 @@ export function createMockRedis() {
     srem: jest.fn().mockResolvedValue(1),
     scard: jest.fn().mockResolvedValue(0),
     sismember: jest.fn().mockResolvedValue(0),
+    set: jest.fn().mockResolvedValue("OK"),
     zcard: jest.fn().mockResolvedValue(0),
     zadd: jest.fn().mockResolvedValue(1),
     zscore: jest.fn().mockResolvedValue(null),

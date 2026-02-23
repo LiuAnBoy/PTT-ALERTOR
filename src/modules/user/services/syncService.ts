@@ -114,14 +114,19 @@ export async function addSubscriptionToRedis(
 ): Promise<void> {
   // Seed article cache if this board has no cache yet,
   // so existing articles won't be treated as "new" on next crawl.
+  // Uses Redis SET NX as a distributed lock to prevent duplicate seeding.
   const empty = await isCacheEmpty(board);
   if (empty) {
-    try {
-      const articles = await fetchHtml(board);
-      await cacheArticles(board, articles);
-      logger.info(`Seeded cache for ${board}: ${articles.length} articles`);
-    } catch (err) {
-      logger.warn(`Failed to seed cache for ${board}: ${(err as Error).message}`);
+    const lockKey = `lock:seed:${board}`;
+    const acquired = await redis.set(lockKey, "1", "EX", 30, "NX");
+    if (acquired) {
+      try {
+        const articles = await fetchHtml(board);
+        await cacheArticles(board, articles);
+        logger.info(`Seeded cache for ${board}: ${articles.length} articles`);
+      } catch (err) {
+        logger.warn(`Failed to seed cache for ${board}: ${(err as Error).message}`);
+      }
     }
   }
 

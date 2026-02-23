@@ -99,21 +99,19 @@ Base image: `node:22-alpine`
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `NODE_ENV` | No | `development` | `production` 時使用 JSON log |
+| `NODE_ENV` | No | `production` | Set to `development` for debug log |
 | `PORT` | No | `8000` | HTTP server port |
-| `POSTGRES_USER` | Yes | `admin` | DB user |
+| `POSTGRES_USER` | Yes | — | DB user |
 | `POSTGRES_PASSWORD` | Yes | — | DB password |
-| `POSTGRES_HOST` | Yes | `localhost` | DB host (docker: `postgres`) |
+| `POSTGRES_HOST` | Yes | — | DB host (docker: `postgres`) |
 | `POSTGRES_PORT` | No | `5432` | DB port |
-| `POSTGRES_DATABASE` | Yes | `ptt-alert` | DB name |
-| `DATABASE_URL` | No | auto-generated | Override full connection string |
-| `REDIS_HOST` | Yes | `localhost` | Redis host (docker: `redis`) |
+| `POSTGRES_DATABASE` | Yes | — | DB name |
+| `REDIS_HOST` | Yes | — | Redis host (docker: `redis`) |
 | `REDIS_PORT` | No | `6379` | Redis port |
 | `TELEGRAM_TOKEN` | Yes | — | Bot token from @BotFather |
-| `TELEGRAM_BOT_USERNAME` | No | — | Bot username |
-| `TELEGRAM_WEBHOOK_URL` | Production | — | Public URL for webhook |
-| `TELEGRAM_WEBHOOK_SECRET` | No | — | Webhook verification secret |
-| `ADMIN_TELEGRAM_ID` | No | — | Admin chat ID for error alerts |
+| `TELEGRAM_BOT_USERNAME` | Yes | — | Bot username |
+| `TELEGRAM_WEBHOOK_URL` | Yes | — | Public URL for webhook |
+| `ADMIN_TELEGRAM_ID` | No | — | Fill in your chat ID to receive FATAL/ERROR alerts |
 
 ## Graceful Shutdown
 

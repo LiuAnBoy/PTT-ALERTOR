@@ -2,15 +2,32 @@
 
 ## Overview
 
-Telegram Bot 透過 webhook 接收使用者訊息，支援中文指令和 `/start` 命令。
+透過 broadcast 模組接收各平台使用者訊息，共用指令邏輯（`commandHandler.ts`）處理後回覆。
+目前支援 Telegram，可透過新增 `channels/<platform>.ts` 擴充其他平台。
 
-## Webhook 設定
+## Architecture
+
+```
+Platform event → channels/telegram.ts → toCommandContext()
+                                             │
+                                             ▼
+                                      commandHandler.ts
+                                      (parseCommand → execute*)
+                                             │
+                                             ▼
+                                      CommandResult { reply }
+                                             │
+                                             ▼
+                                      ctx.reply() (platform-specific)
+```
+
+## Webhook 設定 (Telegram)
 
 ```
 POST /api/telegram/webhook
 ```
 
-Express middleware 由 grammy `webhookCallback` 產生，可選配 `secret_token` 驗證。
+Express middleware 由 grammy `webhookCallback` 產生。
 
 ## Commands
 
@@ -121,24 +138,34 @@ Output (按看板分組):
 
 ## Text Routing
 
-`handleText` 根據訊息文字路由到對應 handler：
+共用 `parseCommand()` 根據訊息文字路由到對應指令：
 
 ```typescript
-if (text === "幫助") return handleHelp(ctx);
-if (text === "清單") return handleList(ctx);
-if (text.startsWith("新增")) return handleAdd(ctx, text.slice(2).trim());
-if (text.startsWith("刪除")) return handleDelete(ctx, text.slice(2).trim());
-// 不認識的文字 → 無回覆
+// commandHandler.ts
+if (text === "幫助") return { command: "help", args: "" };
+if (text === "清單") return { command: "list", args: "" };
+if (text.startsWith("新增")) return { command: "add", args: text.slice(2).trim() };
+if (text.startsWith("刪除")) return { command: "delete", args: text.slice(2).trim() };
+// 不認識的文字 → null → 無回覆
 ```
 
 ## User Resolution
 
-所有需要使用者身份的 handler 都透過 `requireUser(ctx)`：
+所有需要使用者身份的指令透過 `CommandContext` 查詢：
 
 ```
-ctx.from.id → platformUserId
-  → findChannelByPlatformUserId("TELEGRAM", platformUserId)
+CommandContext.platformUserId
+  → findChannelByPlatformUserId(ctx.platform, ctx.platformUserId)
     → channel.user (with User relation)
 ```
 
-找不到 → 回覆「請先輸入 /start」。
+找不到 → 回傳 `{ reply: "❌ 請先輸入 /start 來開始使用。" }`。
+
+## Adding a New Platform
+
+1. Create `src/modules/broadcast/channels/<platform>.ts`
+2. Implement `PlatformAdapter` interface (sendReply, sendNotification, sendAlert)
+3. Convert platform events → `CommandContext`, call `commandHandler` functions
+4. Call `registerAdapter()` at module level (auto-registers on import)
+5. Import the file in `server.ts`
+6. No changes needed to `commandHandler.ts` or `notifierService.ts`

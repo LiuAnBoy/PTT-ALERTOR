@@ -64,13 +64,23 @@ describe("matchKeyword", () => {
 });
 
 describe("matchArticle", () => {
+  /**
+   * Helper to set up pipeline mock for matchArticle.
+   * smembers (top-level) returns subscriber userIds for the board.
+   * pipeline.exec returns keyword arrays for each user.
+   */
+  function setupPipelineMock(subscribers: string[], keywordsByUser: Record<string, string[]>) {
+    mockRedis.smembers.mockResolvedValue(subscribers);
+    const pipelineResults = subscribers.map((userId) => {
+      const keywords = keywordsByUser[userId] ?? [];
+      return [null, keywords];
+    });
+    mockRedis._mockPipeline.exec.mockResolvedValue(pipelineResults);
+  }
+
   // Case 6: board has subscribers with matching keywords
   it("should return matched userId+keyword pairs", async () => {
-    mockRedis.smembers.mockImplementation((key: string) => {
-      if (key === "keyword:Gossiping:subs") return Promise.resolve(["user1"]);
-      if (key === "user:user1:board:Gossiping") return Promise.resolve(["問卦"]);
-      return Promise.resolve([]);
-    });
+    setupPipelineMock(["user1"], { user1: ["問卦"] });
 
     const results = await matchArticle("Gossiping", "[問卦] 今天天氣好嗎");
 
@@ -88,11 +98,7 @@ describe("matchArticle", () => {
 
   // Case 8: subscribers but no matching keywords
   it("should return empty array when no keywords match", async () => {
-    mockRedis.smembers.mockImplementation((key: string) => {
-      if (key === "keyword:Gossiping:subs") return Promise.resolve(["user1"]);
-      if (key === "user:user1:board:Gossiping") return Promise.resolve(["爆卦"]);
-      return Promise.resolve([]);
-    });
+    setupPipelineMock(["user1"], { user1: ["爆卦"] });
 
     const results = await matchArticle("Gossiping", "[問卦] 今天天氣好嗎");
 
@@ -101,11 +107,9 @@ describe("matchArticle", () => {
 
   // Case 9: multiple users, multiple keywords, cross-matching
   it("should return correct results for multiple users and keywords", async () => {
-    mockRedis.smembers.mockImplementation((key: string) => {
-      if (key === "keyword:Gossiping:subs") return Promise.resolve(["user1", "user2"]);
-      if (key === "user:user1:board:Gossiping") return Promise.resolve(["問卦", "天氣"]);
-      if (key === "user:user2:board:Gossiping") return Promise.resolve(["問卦", "爆卦"]);
-      return Promise.resolve([]);
+    setupPipelineMock(["user1", "user2"], {
+      user1: ["問卦", "天氣"],
+      user2: ["問卦", "爆卦"],
     });
 
     const results = await matchArticle("Gossiping", "[問卦] 今天天氣好嗎");
@@ -119,12 +123,10 @@ describe("matchArticle", () => {
 
   // Case 10: multiple users, only some match
   it("should return only matching pairs when some users do not match", async () => {
-    mockRedis.smembers.mockImplementation((key: string) => {
-      if (key === "keyword:Gossiping:subs") return Promise.resolve(["user1", "user2", "user3"]);
-      if (key === "user:user1:board:Gossiping") return Promise.resolve(["問卦"]);
-      if (key === "user:user2:board:Gossiping") return Promise.resolve(["爆卦"]);
-      if (key === "user:user3:board:Gossiping") return Promise.resolve(["天氣"]);
-      return Promise.resolve([]);
+    setupPipelineMock(["user1", "user2", "user3"], {
+      user1: ["問卦"],
+      user2: ["爆卦"],
+      user3: ["天氣"],
     });
 
     const results = await matchArticle("Gossiping", "[問卦] 今天天氣好嗎");

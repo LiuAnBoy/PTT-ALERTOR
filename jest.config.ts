@@ -7,6 +7,7 @@ const config: Config = {
   testMatch: ["**/__tests__/**/*.test.ts", "**/*.test.ts", "**/*.spec.ts"],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",
+    "^p-limit$": "<rootDir>/src/__mocks__/mockPLimit.js",
   },
   collectCoverageFrom: ["src/**/*.ts", "!src/**/*.d.ts", "!src/types/**"],
   coverageDirectory: "coverage",

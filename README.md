@@ -175,24 +175,22 @@ cp .env.example .env
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | **Server** ||||
-| `NODE_ENV` | No | `development` | `production` 使用 JSON log 格式 |
+| `NODE_ENV` | No | `production` | 設為 `development` 啟用 debug log |
 | `PORT` | No | `8000` | HTTP server port |
 | **PostgreSQL** ||||
-| `POSTGRES_USER` | Yes | `admin` | DB 使用者 |
+| `POSTGRES_USER` | Yes | — | DB 使用者 |
 | `POSTGRES_PASSWORD` | Yes | — | DB 密碼 |
-| `POSTGRES_HOST` | Yes | `localhost` | DB host（Docker 內用 `postgres`） |
+| `POSTGRES_HOST` | Yes | — | DB host（Docker 內用 `postgres`） |
 | `POSTGRES_PORT` | No | `5432` | DB port |
-| `POSTGRES_DATABASE` | Yes | `ptt-alert` | DB 名稱 |
-| `DATABASE_URL` | No | auto | 覆蓋完整連線字串 |
+| `POSTGRES_DATABASE` | Yes | — | DB 名稱 |
 | **Redis** ||||
-| `REDIS_HOST` | Yes | `localhost` | Redis host（Docker 內用 `redis`） |
+| `REDIS_HOST` | Yes | — | Redis host（Docker 內用 `redis`） |
 | `REDIS_PORT` | No | `6379` | Redis port |
 | **Telegram** ||||
 | `TELEGRAM_TOKEN` | Yes | — | Bot token（從 [@BotFather](https://t.me/BotFather) 取得） |
-| `TELEGRAM_BOT_USERNAME` | No | — | Bot username |
-| `TELEGRAM_WEBHOOK_URL` | Production | — | Public URL，Telegram 會將 update POST 到此 |
-| `TELEGRAM_WEBHOOK_SECRET` | No | — | Webhook 驗證用 secret |
-| `ADMIN_TELEGRAM_ID` | No | — | Admin chat ID，接收 FATAL/ERROR 告警 |
+| `TELEGRAM_BOT_USERNAME` | Yes | — | Bot username |
+| `TELEGRAM_WEBHOOK_URL` | Yes | — | Public URL，Telegram 會將 update POST 到此 |
+| `ADMIN_TELEGRAM_ID` | No | — | 填入你的 chat ID 即可接收 FATAL/ERROR 告警 |
 
 ## Deployment
 
@@ -290,14 +288,30 @@ src/
 ├── core/               # Config, logger, prisma, redis, queue, maintenance
 ├── modules/
 │   ├── board/          # Crawling, parsing, caching, article repository
+│   ├── broadcast/      # Multi-platform command & notification layer
+│   │   ├── commandHandler.ts   # Shared command logic (platform-agnostic)
+│   │   ├── registry.ts         # Platform adapter registry
+│   │   ├── types.ts            # CommandContext, PlatformAdapter, etc.
+│   │   └── channels/
+│   │       └── telegram.ts     # Telegram: receive + send + formatting
 │   ├── subscription/   # Keyword matching, regex cache
-│   ├── notification/   # Telegram push notifications
-│   └── user/           # Bot handlers, user/channel/subscription repos, sync
+│   ├── notification/   # Push notification worker & service
+│   └── user/           # User/channel/subscription repos, sync, error logging
 ├── middlewares/         # Express error handler
 ├── types/              # Shared type definitions
 ├── app.ts              # Express app
 └── server.ts           # Bootstrap entry point
 ```
+
+### Adding a New Platform
+
+To add a new messaging platform (e.g., Discord, LINE):
+
+1. Add the platform to the `Platform` enum in `prisma/schema.prisma`
+2. Create `src/modules/broadcast/channels/<platform>.ts` implementing `PlatformAdapter`
+3. The file should handle: bot setup, receiving messages → `CommandContext`, and sending via platform API
+4. Import the file in `server.ts` (side-effect import triggers auto-registration)
+5. No changes needed to `commandHandler.ts`, `notifierService.ts`, or `registry.ts`
 
 ## License
 

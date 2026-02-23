@@ -1,5 +1,6 @@
 import "./core/config";
 import "./core/bigint";
+import "./modules/broadcast/channels/telegram";
 
 import { app } from "./app";
 import { config } from "./core/config";
@@ -12,9 +13,9 @@ import { dispatchWorker } from "./modules/board/workers/dispatchWorker";
 import { maintenanceWorker } from "./modules/board/workers/maintenanceWorker";
 import { startScheduler, stopScheduler } from "./modules/board/workers/scheduler";
 import { updateWorker } from "./modules/board/workers/updateWorker";
+import { startBot, stopBot } from "./modules/broadcast/channels/telegram";
 import { notifierWorker } from "./modules/notification/workers/notifierWorker";
 import { closeMatcherWorker } from "./modules/subscription/workers/matcherWorker";
-import { startBot, stopBot } from "./modules/user/bot/bot";
 import { syncSubscriptions } from "./modules/user/services/syncService";
 
 const logger = createLogger("SERVER");

@@ -16,6 +16,7 @@ export interface MatchResult {
 /**
  * Match a new article title against all subscribers for the given board.
  * Non-DB Operation: all data comes from Redis.
+ * Uses pipeline to batch Redis queries for all subscribers.
  *
  * @param board - The board name.
  * @param title - The article title to match against.
@@ -26,11 +27,19 @@ export async function matchArticle(board: string, title: string): Promise<MatchR
   const userIds = await redis.smembers(`keyword:${board}:subs`);
   if (userIds.length === 0) return [];
 
+  // Batch fetch all user keywords via pipeline
+  const pipe = redis.pipeline();
+  for (const userId of userIds) {
+    pipe.smembers(`user:${userId}:board:${board}`);
+  }
+  const results = await pipe.exec();
+
   const matches: MatchResult[] = [];
 
-  for (const userId of userIds) {
-    // Get user's keywords for this board
-    const keywords = await redis.smembers(`user:${userId}:board:${board}`);
+  for (let i = 0; i < userIds.length; i++) {
+    const userId = userIds[i];
+    const [err, keywords] = (results?.[i] ?? [null, []]) as [Error | null, string[]];
+    if (err || !keywords) continue;
 
     for (const keyword of keywords) {
       if (matchKeyword(title, keyword, userId)) {

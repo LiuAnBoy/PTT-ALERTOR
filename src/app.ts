@@ -3,7 +3,7 @@ import express from "express";
 import helmet from "helmet";
 
 import { errorMiddleware } from "./middlewares/errorHandler";
-import { getWebhookHandler, getWebhookPath } from "./modules/user/bot/bot";
+import { getWebhookHandler, getWebhookPath } from "./modules/broadcast/channels/telegram";
 
 const app = express();
 

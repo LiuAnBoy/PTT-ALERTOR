@@ -32,11 +32,16 @@ src/
 │   ├── subscription/   # Keyword matching
 │   │   ├── services/       # matcherService, regexCache
 │   │   └── workers/        # matcherWorker
-│   ├── notification/   # Telegram push
-│   │   ├── services/       # notifierService
+│   ├── broadcast/      # Multi-platform command & notification
+│   │   ├── types.ts        # CommandContext, PlatformAdapter, CommandResult
+│   │   ├── registry.ts     # Platform adapter registry
+│   │   ├── commandHandler.ts # Shared command logic (platform-agnostic)
+│   │   └── channels/       # One file per platform
+│   │       └── telegram.ts # Telegram: bot + receive + send + format
+│   ├── notification/   # Push notification dispatch
+│   │   ├── services/       # notifierService (multi-platform via adapter)
 │   │   └── workers/        # notifierWorker
-│   └── user/           # User management & Telegram bot
-│       ├── bot/            # handlers, adminHandlers, bot setup
+│   └── user/           # User management
 │       ├── repositories/   # userRepository, channelRepository, subscriptionRepository
 │       └── services/       # syncService, boardValidator, errorLogger
 ├── types/              # Shared types (ModuleTag, env)

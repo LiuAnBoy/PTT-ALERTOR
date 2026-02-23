@@ -8,7 +8,7 @@
 
 | Type | Location | 命名 | 依賴 | 數量 |
 |------|----------|------|------|------|
-| Unit | co-located with source | `*.unit.test.ts` | 全部 mock | ~101 |
+| Unit | co-located with source | `*.unit.test.ts` | 全部 mock | ~91 |
 | Integration | `modules/*/tests/` | `*.test.ts` | 真實 DB/Redis/PTT | 4 |
 
 ## Commands
@@ -60,7 +60,7 @@ import { myFunction } from "./myModule";
 | 策略 | 適用對象 | 範例 |
 |------|---------|------|
 | 直接測試純函數 | `@internal` export 的純函數 | `parsePushCount`, `escapeHtml`, `matchKeyword` |
-| `jest.mock()` singleton | 有 singleton 依賴的函數 | `sendNotification` (mock prisma + bot) |
+| `jest.mock()` singleton | 有 singleton 依賴的函數 | `sendNotification` (mock prisma + adapter) |
 | 不測 | thin repository wrapper | `userRepository`, `channelRepository` |
 | 不測 | thin BullMQ worker | `crawlerWorker`, `notifierWorker` |
 
@@ -71,12 +71,12 @@ import { myFunction } from "./myModule";
 | `regexCache.unit.test.ts` | regexCache | 5 |
 | `htmlFetcher.unit.test.ts` | htmlFetcher | 16 |
 | `detailFetcher.unit.test.ts` | detailFetcher | 10 |
-| `notifierService.unit.test.ts` | notifierService | 17 |
+| `notifierService.unit.test.ts` | notifierService | 9 |
 | `matcherService.unit.test.ts` | matcherService | 10 |
 | `articleCache.unit.test.ts` | articleCache | 9 |
 | `syncService.unit.test.ts` | syncService | 11 |
 | `crawlerService.unit.test.ts` | crawlerService | 8 |
-| `handlers.unit.test.ts` | bot handlers | 15 |
+| `telegram.unit.test.ts` | telegram adapter | 13 |
 
 ## Integration Tests
 
