@@ -1,3 +1,5 @@
+import https from "node:https";
+
 import { Bot, type Context, webhookCallback } from "grammy";
 
 import { config } from "../../../core/config";
@@ -32,7 +34,10 @@ export function getBot(): Bot {
       throw new Error("TELEGRAM_TOKEN is not set");
     }
 
-    bot = new Bot(config.telegram.token);
+    const agent = new https.Agent({ family: 4, keepAlive: true });
+    bot = new Bot(config.telegram.token, {
+      client: { baseFetchConfig: { agent } },
+    });
 
     bot.command("start", handleStart);
     bot.command("errors", handleErrors);

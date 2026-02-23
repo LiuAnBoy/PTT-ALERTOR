@@ -1,3 +1,6 @@
+import dns from "node:dns";
+dns.setDefaultResultOrder("ipv4first");
+
 import "./core/config";
 import "./core/bigint";
 import "./modules/broadcast/channels/telegram";
