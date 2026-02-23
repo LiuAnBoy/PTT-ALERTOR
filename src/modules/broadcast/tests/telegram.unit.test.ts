@@ -82,6 +82,14 @@ describe("escapeHtml", () => {
   it('should escape ">" to "&gt;"', () => {
     expect(escapeHtml("a>b")).toBe("a&gt;b");
   });
+
+  it('should escape double quotes to "&quot;"', () => {
+    expect(escapeHtml('a"b')).toBe("a&quot;b");
+  });
+
+  it("should escape single quotes to '&#39;'", () => {
+    expect(escapeHtml("a'b")).toBe("a&#39;b");
+  });
 });
 
 describe("formatMessage", () => {

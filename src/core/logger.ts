@@ -84,7 +84,7 @@ prettyStream.pipe(process.stdout);
  */
 export const baseLogger = pino(
   {
-    level: isDev ? "debug" : "info",
+    level: process.env["LOG_LEVEL"] ?? (isDev ? "debug" : "info"),
     formatters: {
       level(_label: string, number: number) {
         return { level: number };
