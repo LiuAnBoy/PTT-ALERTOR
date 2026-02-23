@@ -1,5 +1,4 @@
 import { Queue } from "bullmq";
-import pLimit from "p-limit";
 
 import { createLogger } from "../../../core/logger";
 import { bullmqConnection } from "../../../core/queue";
@@ -20,6 +19,21 @@ const matcherQueue = new Queue("matcher-queue", { connection: bullmqConnection }
 
 /** Concurrency limit for PTT HTTP requests to avoid rate limiting. */
 const FETCH_CONCURRENCY = 5;
+
+/** Lazily imported p-limit (ESM-only package). */
+let _pLimit: ((concurrency: number) => <T>(fn: () => Promise<T>) => Promise<T>) | null = null;
+
+/**
+ * Get the p-limit function, importing it dynamically on first use.
+ * @returns The p-limit concurrency limiter factory.
+ */
+async function getPLimit() {
+  if (!_pLimit) {
+    const mod = await import("p-limit");
+    _pLimit = mod.default;
+  }
+  return _pLimit;
+}
 
 /**
  * Fetch new articles from a board via HTML scraping.
@@ -86,6 +100,7 @@ export async function updateActiveArticles(): Promise<number> {
     return 0;
   }
 
+  const pLimit = await getPLimit();
   const limit = pLimit(FETCH_CONCURRENCY);
   let updated = 0;
   let expired = 0;
@@ -126,6 +141,7 @@ export async function updateActiveArticles(): Promise<number> {
  * @param articles - Articles to fetch details for.
  */
 async function fetchDetailsForArticles(articles: RawArticle[]): Promise<void> {
+  const pLimit = await getPLimit();
   const limit = pLimit(FETCH_CONCURRENCY);
   let fetched = 0;
 

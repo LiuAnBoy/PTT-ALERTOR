@@ -1,4 +1,4 @@
-import type { Platform } from "@prisma/client";
+import type { Platform, Prisma } from "@prisma/client";
 
 import { getPrisma } from "../../../core/prisma";
 
@@ -32,6 +32,12 @@ export async function createChannel(
   rawData?: Record<string, unknown>,
 ) {
   return getPrisma().channel.create({
-    data: { userId, platform, platformUserId, platformChatId, rawData },
+    data: {
+      userId,
+      platform,
+      platformUserId,
+      platformChatId,
+      rawData: rawData as Prisma.InputJsonValue,
+    },
   });
 }
