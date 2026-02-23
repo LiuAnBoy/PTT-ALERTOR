@@ -4,9 +4,11 @@ services:
     container_name: ptt-alertor-server
     restart: unless-stopped
     ports:
-      - "${PORT:-8000}:8000"
+      - "${PORT}:${PORT}"
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # depends_on:
     #   postgres:
     #     condition: service_healthy

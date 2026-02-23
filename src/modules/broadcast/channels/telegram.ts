@@ -66,8 +66,12 @@ export function getWebhookPath(): string {
  */
 export async function startBot(): Promise<void> {
   const fullUrl = `${config.telegram.webhookUrl}${WEBHOOK_PATH}`;
-  await getBot().api.setWebhook(fullUrl, { secret_token: undefined });
-  logger.info(`Telegram webhook set: ${fullUrl}`);
+  try {
+    await getBot().api.setWebhook(fullUrl, { secret_token: undefined });
+    logger.info(`Telegram webhook set: ${fullUrl}`);
+  } catch (error) {
+    logger.error(`Failed to set Telegram webhook: ${error}`);
+  }
 }
 
 /**

@@ -1,5 +1,5 @@
 import cors from "cors";
-import express from "express";
+import express, { type Express } from "express";
 import helmet from "helmet";
 import pinoHttp from "pino-http";
 
@@ -7,7 +7,7 @@ import { baseLogger } from "./core/logger";
 import { errorMiddleware } from "./middlewares/errorHandler";
 import { getWebhookHandler, getWebhookPath } from "./modules/broadcast/channels/telegram";
 
-const app = express();
+const app: Express = express();
 
 // Middleware
 app.use(helmet());

@@ -22,11 +22,12 @@ COPY package.json pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY prisma ./prisma
+
+RUN npx prisma generate
 
 ENV NODE_ENV=production
 
-EXPOSE 8000
+EXPOSE 9090
 
 CMD ["node", "dist/server.js"]
