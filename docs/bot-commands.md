@@ -161,6 +161,20 @@ CommandContext.platformUserId
 
 找不到 → 回傳 `{ reply: "❌ 請先輸入 /start 來開始使用。" }`。
 
+## Adding a New Command
+
+1. **定義指令邏輯**:
+   在 `src/modules/broadcast/commandHandler.ts` 中：
+   - 更新 `parseCommand(text)` 函數，加入新的關鍵字識別（例如 `text === "設定"`）。
+   - 新增 `execute*` 函數實作業務邏輯（例如 `executeSettings(ctx)`）。
+
+2. **更新平台 Adapter**:
+   在平台 adapter 檔案（如 `src/modules/broadcast/channels/telegram.ts`）的 `handleText` 中：
+   - 在 `switch (parsed.command)` 中加入對應的 case 並呼叫新的 `execute*` 函數。
+
+3. **更新單元測試**:
+   在 `src/modules/broadcast/tests/commandHandler.unit.test.ts` 與 `telegram.unit.test.ts` 加入測試案例。
+
 ## Adding a New Platform
 
 1. Create `src/modules/broadcast/channels/<platform>.ts`

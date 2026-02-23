@@ -1,14 +1,14 @@
-# Crawling Flow
+# 爬取流程
 
-## Overview
+## 概觀
 
-爬蟲流程負責定時抓取 PTT 看板文章，解析 HTML，儲存新文章到 DB 和 Redis Cache。
+爬蟲流程負責定時抓取 PTT 看板文章，解析 HTML，儲存新文章到 DB 和 Redis 快取。
 
-## Flow Diagram
+## 流程圖
 
 ```
-┌───────────┐    every 1 min     ┌──────────────┐
-│ Scheduler │ ──────────────────►│ dispatchQueue│
+┌───────────┐    每 1 分鐘       ┌──────────────┐
+│  排程器   │ ──────────────────►│ dispatchQueue│
 └───────────┘                    └──────┬───────┘
                                         │
                                         ▼
@@ -18,17 +18,17 @@
                                 │ redis.smembers│
                                 │  ("boards")   │
                                 └──────┬────────┘
-                                       │ for each board
+                                       │ 針對每個看板
                                        ▼
                                 ┌───────────────┐
                                 │ crawlerQueue  │
-                                │  (per board)  │
+                                │ (每個看板一個) │
                                 └──────┬────────┘
                                        │
                                        ▼
                                 ┌───────────────┐
                                 │crawlerWorker  │
-                                │ concurrency:5 │
+                                │  併發數：5    │
                                 └──────┬────────┘
                                        │
                                        ▼
@@ -42,8 +42,8 @@
              └──────┬──────┘   └──────┬───────┘
                     │                 │
                     ▼                 ▼
-             Parse HTML         Filter cached
-             .r-ent elements    articles out
+             解析 HTML          過濾已快取的文章
+             .r-ent 元素        (Filter out)
                     │                 │
                     └────────┬────────┘
                              ▼
@@ -52,25 +52,25 @@
                     ├─────────────────┤
                     │ cacheArticles   │ (Redis ZADD)
                     ├─────────────────┤
-                    │ fetchDetail     │ (per article)
+                    │ fetchDetail     │ (每篇文章)
                     ├─────────────────┤
-                    │ matcherQueue.add│ (per article)
+                    │ matcherQueue.add│ (每篇文章)
                     └─────────────────┘
 ```
 
-## Step by Step
+## 步驟詳解
 
-### 1. Scheduler Dispatch (every 1 min)
+### 1. 排程器派發 (每 1 分鐘)
 
-`scheduler.ts` 設定 repeatable job，觸發 `dispatchWorker`。
+`scheduler.ts` 設定重複性工作，觸發 `dispatchWorker`。
 
 ```
-dispatchQueue → every 60,000ms → dispatchWorker
+dispatchQueue → 每 60,000 毫秒 → dispatchWorker
 ```
 
-### 2. Dispatch Worker
+### 2. 派發工作器 (Dispatch Worker)
 
-讀取 Redis `boards` SET，為每個有訂閱者的看板派發一個 crawler job。
+讀取 Redis `boards` 集合，為每個有訂閱者的看板派發一個爬蟲任務 (crawler job)。
 
 ```typescript
 const boards = await redis.smembers("boards");
@@ -79,27 +79,27 @@ for (const board of boards) {
 }
 ```
 
-### 3. Crawler Worker
+### 3. 爬蟲工作器 (Crawler Worker)
 
-每個 crawler job 處理一個看板。Worker concurrency 為 5，同時最多爬 5 個看板。
+每個爬蟲任務處理一個看板。工作器併發數為 5，表示同時最多爬取 5 個看板。
 
 ### 4. fetchHtml — HTML 抓取
 
-1. 透過 `pttClient`（axios）GET `https://www.ptt.cc/bbs/{board}/index.html`
-2. 設定 `Cookie: over18=1` 跳過年齡確認
-3. 用 cheerio 解析 HTML
+1. 透過 `pttClient` (axios) 發送 GET 請求至 `https://www.ptt.cc/bbs/{board}/index.html`
+2. 設定 `Cookie: over18=1` 以跳過年齡確認頁面
+3. 使用 cheerio 解析 HTML
 
 ### 5. HTML 解析規則
 
-| Element | 用途 |
+| 元素 | 用途 |
 |---------|------|
 | `.r-ent` | 每篇文章的容器 |
-| `.r-list-sep` | 置頂文分隔線 — 之後的 `.r-ent` 是置頂文，跳過 |
-| `.title a` | 文章標題 + href |
+| `.r-list-sep` | 置頂文分隔線 — 之後的 `.r-ent` 為置頂文，予以跳過 |
+| `.title a` | 文章標題 + 連結 (href) |
 | `.meta .author` | 作者 |
 | `.nrec span` | 推文數文字 |
 
-### 6. Push Count 解析
+### 6. 推文數 (Push Count) 解析
 
 | 文字 | 結果 |
 |------|------|
@@ -109,51 +109,51 @@ for (const board of boards) {
 | `"10"` | 10 |
 | 非數字 | 0 |
 
-### 7. Article Code 提取
+### 7. 文章代碼 (Article Code) 提取
 
-從 href `/bbs/Gossiping/M.1234567890.A.ABC.html` 提取 code `M.1234567890.A.ABC`。
+從連結 `/bbs/Gossiping/M.1234567890.A.ABC.html` 提取代碼 `M.1234567890.A.ABC`。
 
-Regex: `/\/([GM]\.\d+\.A\.[A-Z0-9]+)\.html/`
+正規表達式：`/\/([GM]\.\d+\.A\.[A-Z0-9]+)\.html/`
 
 ### 8. ALLPOST 看板特殊處理
 
-當 boardName 為 `allpost` 時，真實看板名從標題末尾的 `(BoardName)` 提取，並替換 link 中的 `ALLPOST`。
+當 `boardName` 為 `allpost` 時，真實看板名稱會從標題末尾的 `(BoardName)` 提取，並替換連結中的 `ALLPOST`。
 
-### 9. Filter New Articles
+### 9. 過濾新文章 (Filter New Articles)
 
-用 Redis ZSET pipeline `zscore` 批次查詢，score 為 null 的代表新文章。
+使用 Redis ZSET pipeline 進行 `zscore` 批次查詢，若 score 為 null 則代表該文章為新文章。
 
-### 10. Save & Cache
+### 10. 儲存與快取 (Save & Cache)
 
 - `insertNewArticles` → PostgreSQL (`createMany`, `skipDuplicates`)
-- `cacheArticles` → Redis ZADD（score = timestamp）
+- `cacheArticles` → Redis ZADD (score = 時間戳記)
 
-### 11. Fetch Detail Pages
+### 11. 抓取詳情頁面 (Fetch Detail Pages)
 
-對每篇新文章呼叫 `fetchDetail(link)` 抓取內文頁面，解析：
+對每篇新文章呼叫 `fetchDetail(link)` 抓取內文頁面並解析：
 - 推/噓/→ 計數
-- 內文（去除 metaline 和推文後的 `#main-content`）
-- IP（from `"來自: x.x.x.x"`）
-- Footer 截斷（`"※ 發信站:"` 之後丟棄）
+- 內文 (去除 metaline 和推文後的 `#main-content`)
+- IP (來自 `"來自: x.x.x.x"`)
+- 頁尾截斷 (丟棄 `"※ 發信站:"` 之後的內容)
 
-### 12. Dispatch Matcher Jobs
+### 12. 派發比對任務 (Dispatch Matcher Jobs)
 
-每篇新文章派發到 `matcher-queue`，payload 包含 board, title, code, author, pushSum, link。
+將每篇新文章派發至 `matcher-queue`，內容包含看板、標題、代碼、作者、推文總數及連結。
 
-## Update Flow (every 15 min)
+## 更新流程 (每 15 分鐘)
 
 ```
 updateQueue → updateWorker → updateActiveArticles()
 ```
 
-1. 從 DB 取得所有未過期文章（`expireAt > now`）
-2. 重新 fetchDetail，比對推文數和內文是否有變化
-3. 有變化 → update DB
-4. 404 → 標記文章過期
+1. 從 DB 取得所有尚未過期的文章 (`expireAt > now`)
+2. 重新抓取詳情 (`fetchDetail`)，比對推文數和內文是否有變化
+3. 若有變化 → 更新 DB
+4. 若回傳 404 → 標記文章已過期
 
-## Error Handling
+## 錯誤處理
 
-- HTTP 錯誤 → 記錄到 `crawler_logs` + admin Telegram alert
-- 404 → `ARTICLE_DELETED` sentinel，標記過期
-- 其他錯誤 → return null，跳過該文章
-- BullMQ job 失敗 → exponential backoff retry（最多 3 次）
+- HTTP 錯誤 → 記錄至 `crawler_logs` 並向管理員發送 Telegram 告警
+- 404 → 使用 `ARTICLE_DELETED` 標記，並設定文章過期
+- 其他錯誤 → 回傳 null，跳過該文章
+- BullMQ 任務失敗 → 使用指數退避進行重試 (最多 3 次)

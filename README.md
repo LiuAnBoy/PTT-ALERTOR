@@ -7,9 +7,9 @@
 - **定時爬取** — 每分鐘抓取所有訂閱看板的最新文章
 - **關鍵字比對** — 支援純文字（不分大小寫）和正則表達式
 - **即時推播** — 透過 Telegram Bot 推送通知，速率限制 30 msg/s
-- **多關鍵字訂閱** — 用 `&` 一次新增多個關鍵字
+- **多關鍵字訂閱** — 用 `&` 一次新增多個關鍵字，支援 `regexp:` 正則表達式
 - **自動清理** — 過期文章和 log 自動清除
-- **錯誤告警** — FATAL/ERROR 自動推送給 admin
+- **錯誤告警** — FATAL/ERROR 自動推送給 admin，可透過 `/errors` 查看
 
 ## Tech Stack
 
@@ -73,10 +73,7 @@ pnpm install
 cp .env.example .env
 # 編輯 .env，填入 TELEGRAM_TOKEN（必填）
 
-# 3. 啟動 PostgreSQL + Redis
-pnpm docker:up
-
-# 4. 等待服務就緒後，執行 DB migration
+# 3. 執行 DB migration
 npx prisma migrate dev
 npx prisma generate
 
@@ -104,6 +101,7 @@ curl http://localhost:8000/health
 | 刪除 | 刪除訂閱 | `刪除 Gossiping 問卦` |
 | 清單 | 查看訂閱 | `清單` |
 | 幫助 | 使用說明 | `幫助` |
+| `/errors` | 查看最近錯誤（Admin） | `/errors` |
 
 ### Advanced
 
@@ -134,35 +132,41 @@ Scheduler (1 min)
   [Redis] ◄──── read cache (subscriptions) + article ZSET + BullMQ queues
 ```
 
-## Scripts
+## 腳本 (Scripts)
 
-| Command | Description |
+| 指令 | 說明 |
 |---------|-------------|
-| `pnpm server` | Dev server (nodemon + tsx, hot reload) |
-| `pnpm build` | TypeScript compile |
-| `pnpm start` | Production start |
-| `pnpm test:unit` | Unit tests (~109 cases) |
-| `pnpm test:integration` | Integration tests (requires DB/Redis) |
-| `pnpm test:cov` | Coverage report |
-| `pnpm lint` | ESLint |
-| `pnpm lint:fix` | ESLint auto-fix |
-| `pnpm format` | Prettier |
-| `pnpm docker:up` | Start dev PostgreSQL + Redis |
-| `pnpm docker:down` | Stop dev infrastructure |
+| `pnpm server` | 開發伺服器 (nodemon + tsx, 熱重載) |
+| `pnpm build` | TypeScript 編譯 |
+| `pnpm start` | 生產環境啟動 |
+| `pnpm test:unit` | 單元測試 (117 個案例) |
+| `pnpm test:integration` | 整合測試 (需 DB/Redis) |
+| `pnpm test:cov` | 測試覆蓋率報告 |
+| `pnpm lint` | ESLint 檢查 |
+| `pnpm lint:fix` | ESLint 自動修復 |
+| `pnpm format` | Prettier 格式化 |
 
-## Documentation
+## 文件 (Documentation)
 
-| Document | Description |
+| 文件 | 說明 |
 |----------|-------------|
-| [Architecture](docs/architecture.md) | 系統架構、模組結構、設計決策 |
-| [Crawling Flow](docs/crawling-flow.md) | 爬蟲流程、HTML 解析規則、文章快取 |
-| [Matching Flow](docs/matching-flow.md) | 關鍵字比對演算法、Redis 資料結構 |
-| [Notification Flow](docs/notification-flow.md) | 推播流程、速率限制、錯誤處理 |
-| [Subscription Sync](docs/subscription-sync.md) | DB ↔ Redis 同步機制、cascading cleanup |
-| [Bot Commands](docs/bot-commands.md) | Telegram Bot 指令一覽、routing 邏輯 |
-| [Maintenance](docs/maintenance.md) | 清理策略、文章生命週期、錯誤告警機制 |
-| [Testing](docs/testing.md) | 測試策略、mock 架構、test commands |
-| [Deployment](docs/deployment.md) | Docker 部署、環境變數、啟動/關機流程 |
+| [架構設計 (Architecture)](docs/architecture.md) | 系統架構、模組結構、設計決策 |
+| [爬取流程 (Crawling Flow)](docs/crawling-flow.md) | 爬蟲流程、HTML 解析規則、文章快取 |
+| [比對流程 (Matching Flow)](docs/matching-flow.md) | 關鍵字比對演算法、Redis 資料結構 |
+| [通知流程 (Notification Flow)](docs/notification-flow.md) | 推播流程、速率限制、錯誤處理 |
+| [訂閱同步 (Subscription Sync)](docs/subscription-sync.md) | DB ↔ Redis 同步機制、連鎖清理 (cascading cleanup) |
+| [機器人指令 (Bot Commands)](docs/bot-commands.md) | Telegram Bot 指令一覽、路由邏輯 |
+| [維護與清理 (Maintenance)](docs/maintenance.md) | 清理策略、文章生命週期、錯誤告警機制 |
+| [測試策略 (Testing)](docs/testing.md) | 測試策略、Mock 架構、測試指令 |
+| [部署指南 (Deployment)](docs/deployment.md) | Docker 部署、環境變數、啟動/關機流程 |
+
+## Developer Guide
+
+本專案採用模組化架構，易於擴充：
+
+- **新增平台 (Platform)**: 實作 `PlatformAdapter` 介面，參考 [docs/bot-commands.md](docs/bot-commands.md#adding-a-new-platform)。
+- **新增指令 (Command)**: 修改 `commandHandler.ts` 與平台 adapter，參考 [docs/bot-commands.md](docs/bot-commands.md#adding-a-new-command)。
+- **調整爬蟲邏輯**: 參考 [docs/crawling-flow.md](docs/crawling-flow.md)。
 
 ## Environment Variables
 
@@ -177,12 +181,15 @@ cp .env.example .env
 | **Server** ||||
 | `NODE_ENV` | No | `production` | 設為 `development` 啟用 debug log |
 | `PORT` | No | `8000` | HTTP server port |
+| `LOG_LEVEL` | No | `debug`/`info` | Log 等級（dev 預設 debug，prod 預設 info） |
+| `ALLOWED_ORIGINS` | No | — | CORS 允許的 origin，逗號分隔（未設定則關閉 CORS） |
 | **PostgreSQL** ||||
 | `POSTGRES_USER` | Yes | — | DB 使用者 |
 | `POSTGRES_PASSWORD` | Yes | — | DB 密碼 |
 | `POSTGRES_HOST` | Yes | — | DB host（Docker 內用 `postgres`） |
 | `POSTGRES_PORT` | No | `5432` | DB port |
 | `POSTGRES_DATABASE` | Yes | — | DB 名稱 |
+| `POSTGRES_POOL_SIZE` | No | `10` | DB 連線池大小 |
 | **Redis** ||||
 | `REDIS_HOST` | Yes | — | Redis host（Docker 內用 `redis`） |
 | `REDIS_PORT` | No | `6379` | Redis port |
@@ -197,9 +204,6 @@ cp .env.example .env
 ### Development
 
 ```bash
-# 啟動 PostgreSQL + Redis (Docker)
-pnpm docker:up
-
 # Database migration
 npx prisma migrate dev
 npx prisma generate
@@ -281,43 +285,43 @@ Bot webhook → Workers → Scheduler → HTTP server → Redis → PostgreSQL
 
 > 詳細部署文件請參考 [docs/deployment.md](docs/deployment.md)
 
-## Project Structure
+## 專案結構
 
 ```
 src/
-├── __mocks__/          # Shared mock factories (Redis, Prisma, Bot, Context)
-├── core/               # Config, logger, prisma, redis, queue, maintenance
+├── __mocks__/          # 共享模擬工廠 (Redis, Prisma, Bot, Context)
+├── core/               # 設定、日誌、Prisma、Redis、隊列、維護任務
 ├── modules/
-│   ├── board/          # Crawling, parsing, caching, article repository
-│   │   └── tests/     # Unit + integration tests
-│   ├── broadcast/      # Multi-platform command & notification layer
-│   │   ├── commandHandler.ts   # Shared command logic (platform-agnostic)
-│   │   ├── registry.ts         # Platform adapter registry
-│   │   ├── types.ts            # CommandContext, PlatformAdapter, etc.
+│   ├── board/          # 爬蟲、解析、快取、文章儲存庫
+│   │   └── tests/     # 單元測試 + 整合測試
+│   ├── broadcast/      # 多平台指令與通知層
+│   │   ├── commandHandler.ts   # 共享指令邏輯 (與平台無關)
+│   │   ├── registry.ts         # 平台適配器註冊表
+│   │   ├── types.ts            # CommandContext, PlatformAdapter 等
 │   │   ├── channels/
-│   │   │   └── telegram.ts     # Telegram: receive + send + formatting
-│   │   └── tests/     # Unit tests
-│   ├── subscription/   # Keyword matching, regex cache
-│   │   └── tests/     # Unit tests
-│   ├── notification/   # Push notification worker & service
-│   │   └── tests/     # Unit tests
-│   └── user/           # User/channel/subscription repos, sync, error logging
-│       └── tests/     # Unit tests
-├── middlewares/         # Express error handler
-├── types/              # Shared type definitions
-├── app.ts              # Express app
-└── server.ts           # Bootstrap entry point
+│   │   │   └── telegram.ts     # Telegram：接收 + 發送 + 格式化
+│   │   └── tests/     # 單元測試
+│   ├── subscription/   # 關鍵字比對、正規表達式快取
+│   │   └── tests/     # 單元測試
+│   ├── notification/   # 推播通知工作器與服務
+│   │   └── tests/     # 單元測試
+│   └── user/           # 使用者/頻道/訂閱儲存庫、同步、錯誤日誌
+│       └── tests/     # 單元測試
+├── middlewares/         # Express 錯誤處理中間件
+├── types/              # 共享型別定義
+├── app.ts              # Express 應用設定
+└── server.ts           # 啟動引導進入點
 ```
 
-### Adding a New Platform
+### 新增平台 (Adding a New Platform)
 
-To add a new messaging platform (e.g., Discord, LINE):
+若要新增訊息平台 (例如 Discord, LINE)：
 
-1. Add the platform to the `Platform` enum in `prisma/schema.prisma`
-2. Create `src/modules/broadcast/channels/<platform>.ts` implementing `PlatformAdapter`
-3. The file should handle: bot setup, receiving messages → `CommandContext`, and sending via platform API
-4. Import the file in `server.ts` (side-effect import triggers auto-registration)
-5. No changes needed to `commandHandler.ts`, `notifierService.ts`, or `registry.ts`
+1. 在 `prisma/schema.prisma` 的 `Platform` 列舉中加入該平台。
+2. 建立 `src/modules/broadcast/channels/<platform>.ts` 並實作 `PlatformAdapter` 介面。
+3. 該檔案需處理：Bot 設定、接收訊息 → 轉換為 `CommandContext`，以及透過平台 API 發送訊息。
+4. 在 `server.ts` 中匯入該檔案 (副作用匯入將觸發自動註冊)。
+5. 無須修改 `commandHandler.ts`、`notifierService.ts` 或 `registry.ts`。
 
 ## License
 

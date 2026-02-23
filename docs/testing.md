@@ -8,7 +8,7 @@
 
 | Type | Location | 命名 | 依賴 | 數量 |
 |------|----------|------|------|------|
-| Unit | `modules/*/tests/` | `*.unit.test.ts` | 全部 mock | ~109 |
+| Unit | `modules/*/tests/` | `*.unit.test.ts` | 全部 mock | 117 |
 | Integration | `modules/*/tests/` | `*.test.ts` | 真實 DB/Redis/PTT | 4 |
 
 ## Commands
@@ -69,24 +69,21 @@ import { myFunction } from "../services/myModule";
 | File | Location | Cases |
 |------|----------|-------|
 | `htmlFetcher.unit.test.ts` | `board/tests/` | 16 |
-| `detailFetcher.unit.test.ts` | `board/tests/` | 10 |
+| `detailFetcher.unit.test.ts` | `board/tests/` | 11 |
 | `articleCache.unit.test.ts` | `board/tests/` | 9 |
 | `crawlerService.unit.test.ts` | `board/tests/` | 8 |
 | `regexCache.unit.test.ts` | `subscription/tests/` | 5 |
 | `matcherService.unit.test.ts` | `subscription/tests/` | 10 |
-| `notifierService.unit.test.ts` | `notification/tests/` | 9 |
-| `syncService.unit.test.ts` | `user/tests/` | 11 |
-| `commandHandler.unit.test.ts` | `broadcast/tests/` | 18 |
-| `telegram.unit.test.ts` | `broadcast/tests/` | 13 |
+| `notifierService.unit.test.ts` | `notification/tests/` | 10 |
+| `syncService.unit.test.ts` | `user/tests/` | 13 |
+| `commandHandler.unit.test.ts` | `broadcast/tests/` | 20 |
+| `telegram.unit.test.ts` | `broadcast/tests/` | 15 |
 
 ## Integration Tests
 
 位於 `src/modules/board/tests/`，需要真實基礎設施：
 
 ```bash
-# 先啟動 PostgreSQL + Redis
-pnpm docker:up
-
 # 執行 migration
 npx prisma migrate dev
 

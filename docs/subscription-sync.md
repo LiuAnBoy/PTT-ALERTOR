@@ -1,21 +1,21 @@
-# Subscription Sync
+# 訂閱同步
 
-## Overview
+## 概觀
 
-訂閱同步負責維持 PostgreSQL（source of truth）和 Redis（read cache）之間的資料一致性。
+訂閱同步負責維持 PostgreSQL（事實來源）與 Redis（讀取快取）之間的資料一致性。
 
 ## 兩種同步機制
 
-### 1. Full Sync — 啟動時
+### 1. 全量同步 — 啟動時 (Full Sync)
 
-`syncSubscriptions()` 在 server bootstrap 時執行，將所有 DB 訂閱資料載入 Redis。
+`syncSubscriptions()` 在伺服器引導 (bootstrap) 時執行，將資料庫中的所有訂閱資料載入 Redis。
 
 ```
-Server bootstrap
+伺服器引導
   │
   ├── connectDatabase()
   ├── connectRedis()       ← flushall（清除舊資料）
-  ├── syncSubscriptions()  ← Full sync
+  ├── syncSubscriptions()  ← 全量同步
   ├── startScheduler()
   └── startBot()
 ```
@@ -26,7 +26,7 @@ Server bootstrap
 1. prisma.subscription.findMany()
    → [{ userId, board, keyword }, ...]
 
-2. Group by:
+2. 分組處理:
    boards:         Set<board>
    boardSubs:      Map<board, Set<userId>>
    userKeywords:   Map<userId:board, Set<keyword>>
@@ -44,32 +44,32 @@ Server bootstrap
    EXEC
 ```
 
-#### 為什麼用 flushall + full sync？
+#### 為什麼使用 `flushall` + 全量同步？
 
-- Redis 啟動時是空的（`connectRedis` 呼叫 `flushall`）
-- 確保 Redis 和 DB 完全一致，無殘留資料
-- 單次 pipeline 批次寫入，效率高
+- Redis 啟動時是空的（`connectRedis` 呼叫 `flushall`）。
+- 確保 Redis 和資料庫完全一致，無殘留舊資料。
+- 單次 pipeline 批次寫入，效率最高。
 
-### 2. Real-time Sync — 使用者操作時
+### 2. 即時同步 — 使用者操作時 (Real-time Sync)
 
-使用者透過 Telegram bot 新增或刪除訂閱時，同時寫入 DB 和 Redis。
+使用者透過 Telegram Bot 新增或刪除訂閱時，同時寫入資料庫與 Redis。
 
 #### 新增訂閱
 
 ```
-handleAdd (bot handler)
+handleAdd (Bot handler)
   │
   ├── addSubscription()        → PostgreSQL INSERT
-  └── addSubscriptionToRedis() → Redis sync
+  └── addSubscriptionToRedis() → Redis 同步
         │
         ├── isCacheEmpty(board)?
         │   │
-        │   ├── YES: seed cache
+        │   ├── 是：植入快取 (Seed Cache)
         │   │   ├── fetchHtml(board) → 抓取目前看板文章
         │   │   └── cacheArticles()  → 寫入 Redis ZSET
-        │   │   (避免既有文章被視為「新文章」觸發誤報)
+        │   │   (避免既有文章被視為「新文章」而誤報)
         │   │
-        │   └── NO: skip seeding
+        │   └── 否：跳過植入
         │
         └── Redis pipeline:
             SADD boards {board}
@@ -80,56 +80,56 @@ handleAdd (bot handler)
 #### 刪除訂閱
 
 ```
-handleDelete (bot handler)
+handleDelete (Bot handler)
   │
   ├── deleteSubscription()          → PostgreSQL DELETE
-  └── removeSubscriptionFromRedis() → Redis sync
+  └── removeSubscriptionFromRedis() → Redis 同步
         │
         ├── SREM user:{userId}:board:{board} {keyword}
         │
         ├── SCARD user:{userId}:board:{board}
         │   │
-        │   └── 0 (no remaining keywords):
+        │   └── 0 (使用者已無該看板關鍵字)：
         │       │
         │       ├── SREM keyword:{board}:subs {userId}
         │       │
         │       └── SCARD keyword:{board}:subs
         │           │
-        │           └── 0 (no remaining subscribers):
+        │           └── 0 (該看板已無任何訂閱者)：
         │               └── SREM boards {board}
         │
-        └── > 0: done (user still has other keywords on this board)
+        └── > 0：完成 (使用者仍有該看板的其他關鍵字)
 ```
 
-#### Cascading Cleanup 邏輯
+#### 階層式清理邏輯 (Cascading Cleanup)
 
-刪除訂閱時的清理是逐層的：
+刪除訂閱時採逐層清理：
 
 ```
-keyword removed
-  └── user has no more keywords on this board?
-      └── YES: remove user from board subscriber set
-          └── board has no more subscribers?
-              └── YES: remove board from boards set
-                  (scheduler will stop crawling this board)
+關鍵字移除
+  └── 使用者是否已無該看板之關鍵字？
+      └── 是：從看板訂閱者集合中移除使用者
+          └── 該看板是否已無任何訂閱者？
+              └── 是：從看板列表集合中移除該看板
+                  (排程器將停止爬取此看板)
 ```
 
-## Redis Key Patterns
+## Redis 鍵名模式 (Key Patterns)
 
-| Key | Type | Purpose |
+| 鍵 (Key) | 型別 | 用途 |
 |-----|------|---------|
 | `boards` | SET | 所有有訂閱者的看板 |
-| `keyword:{board}:subs` | SET | 訂閱某看板的所有 user ID |
-| `user:{userId}:board:{board}` | SET | 某 user 在某看板的所有 keyword |
-| `board:{board}:articles` | ZSET | 文章快取（score = timestamp） |
+| `keyword:{board}:subs` | SET | 訂閱某看板的所有使用者 ID |
+| `user:{userId}:board:{board}` | SET | 某使用者在某看板的所有關鍵字 |
+| `board:{board}:articles` | ZSET | 文章快取（score = 時間戳記） |
 
-## Cache Seeding
+## 快取植入 (Cache Seeding)
 
-新增訂閱到一個全新看板時，article cache 是空的。如果不 seed，下次 crawl 會把所有既有文章當成「新文章」，觸發大量誤報通知。
+當新增一個全新看板的訂閱時，文章快取是空的。若不預先植入文章，下次爬蟲會將看板內的所有既有文章視為「新文章」，導致大量誤報通知。
 
-Seeding 流程：
+植入流程：
 1. `isCacheEmpty(board)` → `zcard board:{board}:articles === 0`
-2. `fetchHtml(board)` → 抓取目前看板上的文章
+2. `fetchHtml(board)` → 抓取看板當前的文章
 3. `cacheArticles(board, articles)` → 寫入 Redis ZSET
 
-如果 fetchHtml 失敗（例如看板名稱拼錯但 boardValidator 沒攔到），只 warn 不中斷，訂閱仍會建立。
+若 `fetchHtml` 失敗（例如看板名稱錯誤但 `boardValidator` 未攔截），系統會發出警告但不會中斷流程，訂閱仍會成功建立。

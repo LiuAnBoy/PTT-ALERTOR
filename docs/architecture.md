@@ -1,6 +1,6 @@
-# Architecture Overview
+# 架構概觀
 
-## System Architecture
+## 系統架構
 
 ```
                           ┌──────────────┐
@@ -18,9 +18,8 @@
               │                  │                   │
      ┌────────▼────────┐  ┌─────▼──────┐  ┌────────▼────────┐
      │   Broadcast     │  │  Health     │  │  Error          │
-     │  (platform      │  │  Check API  │  │  Middleware      │
-     │   adapters)     │  └────────────┘  └─────────────────┘
-     └────────┬────────┘
+     │  (平台適配器)    │  │  Check API  │  │  Middleware      │
+     └────────┬────────┘  └────────────┘  └─────────────────┘
               │
               │ CommandContext → commandHandler → CommandResult
               ▼
@@ -33,11 +32,11 @@
               │      │                   │
      ┌────────▼──────▼───┐    ┌─────────▼──────────┐
      │    BullMQ Queue   │    │   Redis Cache       │
-     │    (Job System)   │    │   (Article ZSET)    │
+     │    (工作系統)     │    │   (文章 ZSET)       │
      └────────┬──────────┘    └────────────────────┘
               │
      ┌────────▼──────────────────────────────────┐
-     │              Worker Pipeline              │
+     │               工作管線 (Worker)           │
      │                                           │
      │  Scheduler ──► Dispatch ──► Crawler       │
      │                               │           │
@@ -47,142 +46,142 @@
      └───────────────────────────────────────────┘
 ```
 
-## Module Structure
+## 模組結構
 
 ```
 src/
-├── core/                     # Shared infrastructure
-│   ├── config.ts             # Centralized env config (dotenv)
-│   ├── logger.ts             # Pino logger with aligned formatting
-│   ├── prisma.ts             # Prisma client singleton (lazy init via Proxy)
-│   ├── redis.ts              # ioredis singleton
-│   ├── queue.ts              # BullMQ shared connection config
-│   ├── maintenance.ts        # Cleanup tasks (articles, logs, cache)
-│   ├── bigint.ts             # BigInt JSON serialization polyfill
-│   ├── dayjs.ts              # dayjs instance
-│   ├── startupLogger.ts      # Startup config logging
-│   ├── errors/AppError.ts    # Custom error class
-│   └── base/BaseModule.ts    # Abstract singleton base
+├── core/                     # 共享基礎設施
+│   ├── config.ts             # 集中式環境變數設定 (dotenv)
+│   ├── logger.ts             # Pino 日誌器，格式統一
+│   ├── prisma.ts             # Prisma client 單例 (透過 Proxy 延遲初始化)
+│   ├── redis.ts              # ioredis 單例
+│   ├── queue.ts              # BullMQ 共享連線設定
+│   ├── maintenance.ts        # 清理任務 (文章、日誌、快取)
+│   ├── bigint.ts             # BigInt JSON 序列化修正
+│   ├── dayjs.ts              # dayjs 實例
+│   ├── startupLogger.ts      # 啟動設定日誌
+│   ├── errors/AppError.ts    # 自定義錯誤類別
+│   └── base/BaseModule.ts    # 抽象單例基底
 │
 ├── modules/
-│   ├── board/                # Article crawling & caching
+│   ├── board/                # 文章爬取與快取
 │   │   ├── services/
-│   │   │   ├── pttClient.ts        # Axios instance for PTT
-│   │   │   ├── htmlFetcher.ts      # HTML scraping (board list page)
-│   │   │   ├── detailFetcher.ts    # Article detail page parsing
-│   │   │   ├── articleCache.ts     # Redis ZSET article cache
-│   │   │   └── crawlerService.ts   # Orchestrator (fetch → filter → save → dispatch)
+│   │   │   ├── pttClient.ts        # PTT Axios 實例
+│   │   │   ├── htmlFetcher.ts      # HTML 抓取 (看板列表頁)
+│   │   │   ├── detailFetcher.ts    # 文章詳情頁解析
+│   │   │   ├── articleCache.ts     # Redis ZSET 文章快取
+│   │   │   └── crawlerService.ts   # 調度器 (抓取 → 過濾 → 儲存 → 派發)
 │   │   ├── repositories/
 │   │   │   └── articleRepository.ts
 │   │   ├── workers/
-│   │   │   ├── scheduler.ts        # Repeatable job schedulers
-│   │   │   ├── dispatchWorker.ts   # Reads boards → dispatches crawler jobs
-│   │   │   ├── crawlerWorker.ts    # Processes crawler jobs (concurrency: 5)
-│   │   │   ├── updateWorker.ts     # Refreshes active article details
+│   │   │   ├── scheduler.ts        # 定時任務調度器
+│   │   │   ├── dispatchWorker.ts   # 讀取看板 → 派發爬蟲任務
+│   │   │   ├── crawlerWorker.ts    # 處理爬蟲任務 (併發數: 5)
+│   │   │   ├── updateWorker.ts     # 重新整理活躍文章詳情
 │   │   │   └── maintenanceWorker.ts
-│   │   ├── tests/                  # Unit + integration tests
+│   │   ├── tests/                  # 單元測試 + 整合測試
 │   │   └── types/article.ts
 │   │
-│   ├── subscription/         # Keyword matching
+│   ├── subscription/         # 關鍵字比對
 │   │   ├── services/
-│   │   │   ├── matcherService.ts   # Title vs keyword matching (plain + regex)
-│   │   │   └── regexCache.ts       # In-memory regex compilation cache
+│   │   │   ├── matcherService.ts   # 標題與關鍵字比對 (純文字 + 正則)
+│   │   │   └── regexCache.ts       # 記憶體內正則編譯快取
 │   │   ├── workers/
-│   │   │   └── matcherWorker.ts    # Processes match jobs (concurrency: 5)
-│   │   └── tests/                  # Unit tests
+│   │   │   └── matcherWorker.ts    # 處理比對任務 (併發數: 5)
+│   │   └── tests/                  # 單元測試
 │   │
-│   ├── broadcast/            # Multi-platform command & notification
+│   ├── broadcast/            # 多平台指令與通知
 │   │   ├── types.ts               # CommandContext, PlatformAdapter, CommandResult
-│   │   ├── registry.ts            # Platform adapter registry
-│   │   ├── commandHandler.ts      # Shared command logic (platform-agnostic)
+│   │   ├── registry.ts            # 平台適配器註冊表
+│   │   ├── commandHandler.ts      # 共享指令邏輯 (平台無關)
 │   │   ├── channels/
-│   │   │   └── telegram.ts        # Telegram: bot setup + receive + send + format
-│   │   └── tests/                  # Unit tests
+│   │   │   └── telegram.ts        # Telegram: Bot 設定 + 接收 + 發送 + 格式化
+│   │   └── tests/                  # 單元測試
 │   │
-│   ├── notification/         # Push notification dispatch
+│   ├── notification/         # 推播通知派發
 │   │   ├── services/
-│   │   │   └── notifierService.ts  # Multi-platform notification via adapter registry
+│   │   │   └── notifierService.ts  # 透過註冊表進行多平台通知
 │   │   ├── workers/
-│   │   │   └── notifierWorker.ts   # Rate-limited sender (30 msg/s)
-│   │   └── tests/                  # Unit tests
+│   │   │   └── notifierWorker.ts   # 速率限制發送器 (30 msg/s)
+│   │   └── tests/                  # 單元測試
 │   │
-│   └── user/                 # User management
+│   └── user/                 # 使用者管理
 │       ├── repositories/
 │       │   ├── userRepository.ts
 │       │   ├── channelRepository.ts
 │       │   └── subscriptionRepository.ts
 │       ├── services/
-│       │   ├── syncService.ts      # DB → Redis subscription sync
-│       │   ├── boardValidator.ts   # PTT board existence check
-│       │   └── errorLogger.ts      # DB error logging + admin alerts
-│       └── tests/                  # Unit tests
+│       │   ├── syncService.ts      # DB → Redis 訂閱同步
+│       │   ├── boardValidator.ts   # PTT 看板存在檢查
+│       │   └── errorLogger.ts      # DB 錯誤日誌 + 管理員告警
+│       └── tests/                  # 單元測試
 │
 ├── middlewares/
-│   └── errorHandler.ts       # Express error middleware
-├── types/                    # Shared types
-├── app.ts                    # Express app setup
-└── server.ts                 # Bootstrap entry point
+│   └── errorHandler.ts       # Express 錯誤處理中間件
+├── types/                    # 共享型別
+├── app.ts                    # Express 應用程式設定
+└── server.ts                 # 啟動進入點
 ```
 
-## Data Model
+## 資料模型
 
-### User
-| Column | Type | Description |
+### User (使用者)
+| 欄位 | 型別 | 描述 |
 |--------|------|-------------|
-| `id` | UUID | Primary key |
-| `enable` | Boolean | Enable/disable notifications |
-| `username` | String? | Display name (from first platform registration) |
-| `email` | String? | Email address |
-| `phone` | String? | Phone number |
-| `createdAt` | DateTime | Registration time |
-| `updatedAt` | DateTime | Last update time |
+| `id` | UUID | 主鍵 |
+| `enable` | Boolean | 啟用/停用通知 |
+| `username` | String? | 顯示名稱 (來自首次註冊平台) |
+| `email` | String? | 電子郵件 |
+| `phone` | String? | 電話號碼 |
+| `createdAt` | DateTime | 註冊時間 |
+| `updatedAt` | DateTime | 最後更新時間 |
 
-### Channel
-| Column | Type | Description |
+### Channel (頻道)
+| 欄位 | 型別 | 描述 |
 |--------|------|-------------|
-| `id` | UUID | Primary key |
-| `platform` | Platform | TELEGRAM, DISCORD, LINE, etc. |
-| `platformUserId` | String | User ID on the platform |
-| `platformChatId` | String | Chat ID for sending messages |
-| `rawData` | Json? | Raw platform user data (e.g. full `ctx.from` object) |
-| `userId` | String | FK → User |
-| `createdAt` | DateTime | Creation time |
+| `id` | UUID | 主鍵 |
+| `platform` | Platform | TELEGRAM, DISCORD, LINE 等 |
+| `platformUserId` | String | 平台上的使用者 ID |
+| `platformChatId` | String | 發送訊息用的聊天 ID |
+| `rawData` | Json? | 平台原始使用者資料 (例如完整的 `ctx.from` 物件) |
+| `userId` | String | 外鍵 → User |
+| `createdAt` | DateTime | 建立時間 |
 
-Unique constraint: `(platform, platformUserId)`
+唯一約束：`(platform, platformUserId)`
 
-### Multi-Platform Registration
+### 多平台註冊
 
-Each `/start` creates an independent User + Channel pair.
-Future: binding command to link channels across platforms to a single User.
+每個 `/start` 都會建立獨立的 User + Channel 配對。
+未來計畫：提供綁定指令，將不同平台的頻道連結到單一 User。
 
-## Design Decisions
+## 設計決策
 
-### Platform Adapter Pattern
-- `broadcast/` module abstracts all platform-specific logic behind `PlatformAdapter` interface
-- Each platform is a single file in `channels/` (e.g., `telegram.ts`)
-- Platform handles: receiving messages → `CommandContext`, sending via platform API
-- Shared `commandHandler.ts` processes all commands, returns `CommandResult`
-- `notifierService.ts` dispatches to correct adapter via `getAdapter(channel.platform)`
-- To add a new platform: create `channels/<platform>.ts`, implement `PlatformAdapter`, auto-registers on import
+### 平台適配器模式 (Platform Adapter Pattern)
+- `broadcast/` 模組將所有平台相關邏輯抽象化為 `PlatformAdapter` 介面
+- 每個平台對應 `channels/` 下的一個檔案 (例如 `telegram.ts`)
+- 平台負責：接收訊息 → 轉換為 `CommandContext`，透過平台 API 發送訊息
+- 共享的 `commandHandler.ts` 處理所有指令並回傳 `CommandResult`
+- `notifierService.ts` 透過 `getAdapter(channel.platform)` 調用正確的適配器
+- 新增平台：建立 `channels/<platform>.ts`，實作 `PlatformAdapter`，匯入時自動註冊
 
-### Singleton Pattern
-- `redis`, `prisma` (Proxy), `bot` (lazy `getBot()`) are all singletons
-- Enables `jest.mock()` to swap out entire modules in unit tests
+### 單例模式 (Singleton Pattern)
+- `redis`, `prisma` (Proxy), `bot` (延遲 `getBot()`) 皆為單例
+- 便於 `jest.mock()` 在單元測試中替換整個模組
 
-### Repository Layer
-- Thin Prisma wrappers with no business logic
-- Not unit tested — tested implicitly via integration tests
+### 儲存庫層 (Repository Layer)
+- 包裝 Prisma 的薄層，不含業務邏輯
+- 不進行單元測試 — 透過整合測試進行間接測試
 
-### Service Layer
-- Contains all business logic
-- Pure functions exported with `@internal` for direct unit testing
-- Async functions tested with `jest.mock()` on their dependencies
+### 服務層 (Service Layer)
+- 包含所有業務邏輯
+- 匯出標註為 `@internal` 的純函數以供直接單元測試
+- 非同步函數透過 `jest.mock()` 模擬其依賴項進行測試
 
-### Worker Layer
-- Thin BullMQ wrappers that call services
-- Not unit tested — the service layer covers the logic
+### 工作層 (Worker Layer)
+- 包裝 BullMQ 的薄層，呼叫服務層
+- 不進行單元測試 — 邏輯已由服務層覆蓋
 
-### Redis as Read Cache
-- All subscription data synced from PostgreSQL to Redis on startup
-- Crawler and matcher read exclusively from Redis (zero DB queries in hot path)
-- Writes go to both PostgreSQL (source of truth) and Redis (real-time sync)
+### Redis 作為讀取快取
+- 啟動時將所有訂閱資料從 PostgreSQL 同步到 Redis
+- 爬蟲與比對器僅從 Redis 讀取 (熱點路徑零 DB 查詢)
+- 寫入時同時更新 PostgreSQL (事實來源) 與 Redis (即時同步)
