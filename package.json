@@ -1,14 +1,14 @@
 {
-  "name": "crawler_service",
+  "name": "ptt-alertor",
   "version": "1.0.0",
   "description": "PTT Alertor Crawler Service",
+  "author": "CLA",
+  "license": "Apache-2.0",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
     "server": "nodemon --exec tsx src/server.ts --ext ts --watch src",
     "start": "node dist/server.js",
-    "docker:up": "docker compose -f docker-compose.dev.yml up -d",
-    "docker:down": "docker compose -f docker-compose.dev.yml down",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "format": "prettier --write src/",
@@ -18,9 +18,33 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "ptt",
+    "alertor",
+    "crawler",
+    "telegram",
+    "bot"
+  ],
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.4.1",
+    "@prisma/client": "^7.4.1",
+    "axios": "^1.13.5",
+    "axios-retry": "^4.5.0",
+    "bullmq": "^5.70.0",
+    "cheerio": "^1.2.0",
+    "cors": "^2.8.6",
+    "dayjs": "^1.11.19",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "grammy": "^1.40.0",
+    "helmet": "^8.1.0",
+    "ioredis": "^5.9.3",
+    "p-limit": "^7.3.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "pino-pretty": "^13.1.3",
+    "safe-regex2": "^5.0.0"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/cheerio": "^0.22.35",
@@ -42,25 +66,5 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.0"
-  },
-  "dependencies": {
-    "@prisma/adapter-pg": "^7.4.1",
-    "@prisma/client": "^7.4.1",
-    "axios": "^1.13.5",
-    "axios-retry": "^4.5.0",
-    "bullmq": "^5.70.0",
-    "cheerio": "^1.2.0",
-    "cors": "^2.8.6",
-    "dayjs": "^1.11.19",
-    "dotenv": "^17.3.1",
-    "express": "^5.2.1",
-    "grammy": "^1.40.0",
-    "helmet": "^8.1.0",
-    "ioredis": "^5.9.3",
-    "p-limit": "^7.3.0",
-    "pino": "^10.3.1",
-    "pino-http": "^11.0.0",
-    "pino-pretty": "^13.1.3",
-    "safe-regex2": "^5.0.0"
   }
 }
