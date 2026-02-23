@@ -208,6 +208,20 @@ describe("executeAdd", () => {
     expect(result.reply).toContain("查無此看板");
   });
 
+  it("should normalize board name to capitalize first letter", async () => {
+    mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
+    mockBoardExists.mockResolvedValue(true);
+    mockSubscriptionExists.mockResolvedValue(false);
+    mockAddSubscription.mockResolvedValue({});
+    mockAddToRedis.mockResolvedValue(undefined);
+
+    const result = await executeAdd(buildCtx(), "stock 台積電");
+
+    expect(result.reply).toContain("成功新增");
+    expect(mockBoardExists).toHaveBeenCalledWith("Stock");
+    expect(mockAddSubscription).toHaveBeenCalledWith("user-1", "Stock", "台積電");
+  });
+
   it("should add subscription successfully", async () => {
     mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
     mockBoardExists.mockResolvedValue(true);

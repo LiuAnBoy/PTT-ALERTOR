@@ -15,6 +15,16 @@ import type { CommandContext, CommandResult } from "./types";
 const logger = createLogger("COMMAND");
 
 /**
+ * Normalize a board name to capitalize the first letter (e.g. "stock" → "Stock").
+ * @param name - The raw board name input.
+ * @returns The normalized board name.
+ */
+function normalizeBoardName(name: string): string {
+  const lower = name.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+/**
  * Parse a text message into a command and its arguments.
  * @param text - The raw text message.
  * @returns Parsed command and args, or null if not recognized.
@@ -141,13 +151,13 @@ export async function executeAdd(ctx: CommandContext, args: string): Promise<Com
     return { reply: "❌ 格式錯誤。用法：新增 [看板] [關鍵字]\n範例：新增 Gossiping 問卦" };
   }
 
-  const boardName = parts[0];
+  const boardName = normalizeBoardName(parts[0]);
   const keywordStr = parts.slice(1).join(" ");
 
   // Validate board exists
   const valid = await boardExists(boardName);
   if (!valid) {
-    return { reply: `❌ 查無此看板「${boardName}」。請確認看板名稱（區分大小寫）。` };
+    return { reply: `❌ 查無此看板「${boardName}」。請確認看板名稱是否正確。` };
   }
 
   // Split keywords by &
@@ -196,7 +206,7 @@ export async function executeDelete(ctx: CommandContext, args: string): Promise<
     return { reply: "❌ 格式錯誤。用法：刪除 [看板] [關鍵字]\n範例：刪除 Gossiping 問卦" };
   }
 
-  const boardName = parts[0];
+  const boardName = normalizeBoardName(parts[0]);
   const keyword = parts.slice(1).join(" ");
 
   const exists = await subscriptionExists(user.id, boardName, keyword);
