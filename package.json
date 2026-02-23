@@ -47,6 +47,7 @@
     "@prisma/adapter-pg": "^7.4.1",
     "@prisma/client": "^7.4.1",
     "axios": "^1.13.5",
+    "axios-retry": "^4.5.0",
     "bullmq": "^5.70.0",
     "cheerio": "^1.2.0",
     "cors": "^2.8.6",

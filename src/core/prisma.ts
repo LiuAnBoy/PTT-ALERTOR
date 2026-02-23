@@ -14,7 +14,10 @@ let _prisma: PrismaClient | null = null;
  */
 export function getPrisma(): PrismaClient {
   if (!_prisma) {
-    const adapter = new PrismaPg({ connectionString: config.postgres.url });
+    const adapter = new PrismaPg({
+      connectionString: config.postgres.url,
+      max: config.postgres.poolSize,
+    });
     _prisma = new PrismaClient({ adapter });
   }
   return _prisma;

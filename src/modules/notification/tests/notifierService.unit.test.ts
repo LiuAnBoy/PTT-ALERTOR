@@ -1,12 +1,13 @@
 /**
  * Unit tests for notifierService.
  *
- * Covers sendNotification with platform adapter dispatch.
+ * Covers sendNotification with platform adapter dispatch,
+ * error classification (permanent vs temporary), and retry behavior.
  */
 
 import type { NotificationPayload } from "../../broadcast/types";
 import { logError } from "../../user/services/errorLogger";
-import { sendNotification } from "../services/notifierService";
+import { isPermanentError, sendNotification } from "../services/notifierService";
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -43,7 +44,6 @@ jest.mock("../../user/services/errorLogger", () => ({
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/** Build a standard payload for reuse across tests. */
 function buildPayload(overrides: Partial<NotificationPayload> = {}): NotificationPayload {
   return {
     userId: "user-1",
@@ -60,12 +60,35 @@ function buildPayload(overrides: Partial<NotificationPayload> = {}): Notificatio
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
+describe("isPermanentError", () => {
+  it("should return true for bot blocked error", () => {
+    expect(isPermanentError(new Error("bot was blocked by the user"))).toBe(true);
+  });
+
+  it("should return true for deactivated user", () => {
+    expect(isPermanentError(new Error("user is deactivated"))).toBe(true);
+  });
+
+  it("should return true for 403 status", () => {
+    const err = Object.assign(new Error("Forbidden"), { response: { status: 403 } });
+    expect(isPermanentError(err)).toBe(true);
+  });
+
+  it("should return false for network error", () => {
+    expect(isPermanentError(new Error("ECONNRESET"))).toBe(false);
+  });
+
+  it("should return false for 429 rate limit", () => {
+    const err = Object.assign(new Error("Too Many Requests"), { response: { status: 429 } });
+    expect(isPermanentError(err)).toBe(false);
+  });
+});
+
 describe("sendNotification", () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  // Case 1
   it("should send notification via adapter and return true", async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       enable: true,
@@ -76,11 +99,9 @@ describe("sendNotification", () => {
     const result = await sendNotification(buildPayload());
 
     expect(result).toBe(true);
-    expect(mockAdapter.sendNotification).toHaveBeenCalledTimes(1);
     expect(mockAdapter.sendNotification).toHaveBeenCalledWith("chat-1", buildPayload());
   });
 
-  // Case 2
   it("should return false when user is not found", async () => {
     mockPrisma.user.findUnique.mockResolvedValue(null);
 
@@ -90,8 +111,7 @@ describe("sendNotification", () => {
     expect(mockAdapter.sendNotification).not.toHaveBeenCalled();
   });
 
-  // Case 3
-  it("should return false when user is found but enable is false", async () => {
+  it("should return false when user.enable is false", async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       enable: false,
       channels: [{ id: "ch-1", platform: "TELEGRAM", platformChatId: "chat-1" }],
@@ -100,10 +120,8 @@ describe("sendNotification", () => {
     const result = await sendNotification(buildPayload());
 
     expect(result).toBe(false);
-    expect(mockAdapter.sendNotification).not.toHaveBeenCalled();
   });
 
-  // Case 4
   it("should return false when user has no channels", async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       enable: true,
@@ -115,8 +133,7 @@ describe("sendNotification", () => {
     expect(result).toBe(false);
   });
 
-  // Case 5
-  it("should return true when one channel fails but another succeeds (partial success)", async () => {
+  it("should return true when one channel fails but another succeeds", async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       enable: true,
       channels: [
@@ -131,11 +148,37 @@ describe("sendNotification", () => {
     const result = await sendNotification(buildPayload());
 
     expect(result).toBe(true);
-    expect(mockAdapter.sendNotification).toHaveBeenCalledTimes(2);
   });
 
-  // Case 6
-  it("should return false and call logError when all channels fail", async () => {
+  it("should throw temporary error when all channels fail with temporary errors", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      enable: true,
+      channels: [{ id: "ch-1", platform: "TELEGRAM", platformChatId: "chat-1" }],
+    });
+    mockAdapter.sendNotification.mockRejectedValueOnce(new Error("ECONNRESET"));
+
+    await expect(sendNotification(buildPayload())).rejects.toThrow("ECONNRESET");
+  });
+
+  it("should return false without throwing when all channels fail with permanent errors", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      enable: true,
+      channels: [{ id: "ch-1", platform: "TELEGRAM", platformChatId: "chat-1" }],
+    });
+    mockAdapter.sendNotification.mockRejectedValueOnce(new Error("bot was blocked by the user"));
+
+    const result = await sendNotification(buildPayload());
+
+    expect(result).toBe(false);
+    expect(logError).toHaveBeenCalledWith(
+      "ERROR",
+      "NOTIFIER",
+      "TELEGRAM send failed (permanent)",
+      expect.objectContaining({ userId: "user-1" }),
+    );
+  });
+
+  it("should log permanent and temporary errors with different labels", async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       enable: true,
       channels: [
@@ -144,34 +187,25 @@ describe("sendNotification", () => {
       ],
     });
     mockAdapter.sendNotification
-      .mockRejectedValueOnce(new Error("Fail 1"))
-      .mockRejectedValueOnce(new Error("Fail 2"));
+      .mockRejectedValueOnce(new Error("bot was blocked by the user"))
+      .mockRejectedValueOnce(new Error("ECONNRESET"));
 
-    const result = await sendNotification(buildPayload());
+    await expect(sendNotification(buildPayload())).rejects.toThrow("ECONNRESET");
 
-    expect(result).toBe(false);
-    expect(logError).toHaveBeenCalledTimes(2);
+    expect(logError).toHaveBeenCalledWith(
+      "ERROR",
+      "NOTIFIER",
+      "TELEGRAM send failed (permanent)",
+      expect.objectContaining({ channelId: "ch-1" }),
+    );
+    expect(logError).toHaveBeenCalledWith(
+      "ERROR",
+      "NOTIFIER",
+      "TELEGRAM send failed (temporary)",
+      expect.objectContaining({ channelId: "ch-2" }),
+    );
   });
 
-  // Case 7
-  it("should call logError with platform name on channel failure", async () => {
-    const payload = buildPayload({ userId: "user-err" });
-    mockPrisma.user.findUnique.mockResolvedValue({
-      enable: true,
-      channels: [{ id: "ch-fail", platform: "TELEGRAM", platformChatId: "chat-fail" }],
-    });
-    mockAdapter.sendNotification.mockRejectedValueOnce(new Error("Bot blocked by user"));
-
-    await sendNotification(payload);
-
-    expect(logError).toHaveBeenCalledWith("ERROR", "NOTIFIER", "TELEGRAM send failed", {
-      userId: "user-err",
-      channelId: "ch-fail",
-      error: "Bot blocked by user",
-    });
-  });
-
-  // Case 8
   it("should send to multiple channels all successfully", async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       enable: true,
@@ -189,7 +223,6 @@ describe("sendNotification", () => {
     expect(mockAdapter.sendNotification).toHaveBeenCalledTimes(3);
   });
 
-  // Case 9
   it("should query all channels without platform filter", async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       enable: true,

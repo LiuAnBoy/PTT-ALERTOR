@@ -23,6 +23,7 @@ export const config = {
     host: process.env["POSTGRES_HOST"] ?? "",
     port: Number(process.env["POSTGRES_PORT"]) || 5432,
     database: process.env["POSTGRES_DATABASE"] ?? "",
+    poolSize: Number(process.env["POSTGRES_POOL_SIZE"]) || 10,
     get url(): string {
       return `postgresql://${config.postgres.user}:${config.postgres.password}@${config.postgres.host}:${config.postgres.port}/${config.postgres.database}`;
     },
