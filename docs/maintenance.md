@@ -12,15 +12,7 @@ maintenanceQueue → every 3,600,000ms (1 hour) → maintenanceWorker → runCle
 
 ## Cleanup Tasks
 
-### 1. Article Cleanup
-
-**保留期限**: 7 天
-
-```sql
-DELETE FROM articles WHERE created_at < (now - 7 days)
-```
-
-### 2. Crawler Log Cleanup
+### 1. Crawler Log Cleanup
 
 **保留期限**: 30 天
 
@@ -28,16 +20,17 @@ DELETE FROM articles WHERE created_at < (now - 7 days)
 DELETE FROM crawler_logs WHERE created_at < (now - 30 days)
 ```
 
-### 3. Redis Cache Cleanup
+### 2. Redis Active Articles Cleanup
 
-**保留期限**: 7 天（與 article 一致）
+**保留期限**: 24 小時
 
 ```
-for each key matching "board:*:articles":
-  ZREMRANGEBYSCORE key -inf {cutoff_timestamp}
+ZREMRANGEBYSCORE active:articles -inf {cutoff_timestamp}
 ```
 
-`cutoff_timestamp` = (now - 7 days) 的 Unix timestamp（秒）。
+`cutoff_timestamp` = (now - 24h) 的 Unix timestamp（秒）。
+
+> DB 中的文章永久保留，不做 hard delete。
 
 ## Article Lifecycle
 
@@ -45,32 +38,31 @@ for each key matching "board:*:articles":
   fetchHtml → New article discovered
       │
       ▼
-  insertNewArticles (PostgreSQL)
-  cacheArticles (Redis ZADD, score = timestamp)
-  expireAt = now + 3 days
+  insertNewArticles (PostgreSQL, 永久保留)
+  cacheArticles (Redis: ZADD active:articles + HSET board:latest)
       │
       ▼
   updateActiveArticles (every 15 min)
-  ← refreshes detail for articles where expireAt > now
+  ← ZRANGEBYSCORE active:articles 取得 24h 內文章
       │
-      ├── detail changed → UPDATE
-      ├── 404 → expireArticle (set expireAt = now)
+      ├── detail changed → UPDATE DB
+      ├── 404 → removeActiveArticle (ZREM from active:articles)
       └── no change → skip
       │
       ▼
   runCleanup (every 1 hour)
-  ← deletes articles where createdAt < (now - 7 days)
-  ← removes Redis cache entries with score < cutoff
+  ← ZREMRANGEBYSCORE active:articles：移除超過 24h 的條目
+  ← DELETE crawler_logs：移除超過 30 天的日誌
 ```
 
-### Expiry vs Cleanup
+### Data Retention
 
-| 概念 | 欄位/Key | 用途 |
-|------|----------|------|
-| **Expiry** (3 days) | `article.expireAt` | 控制 updateWorker 是否繼續追蹤 |
-| **Cleanup** (7 days) | `article.createdAt` | 實際從 DB 和 Redis 移除 |
-
-文章在 3 天後停止被 update，7 天後被完全刪除。
+| 概念 | 儲存位置 | 保留期限 | 用途 |
+|------|----------|----------|------|
+| **Active Tracking** | `active:articles` ZSET | 24 小時 | 控制 updateWorker 是否繼續追蹤推文變化 |
+| **Latest Timestamp** | `board:latest` HASH | 隨 Redis 生命週期 | 判斷新文章的時間基準 |
+| **Article Record** | PostgreSQL `articles` | 永久 | 歷史文章紀錄 |
+| **Crawler Log** | PostgreSQL `crawler_logs` | 30 天 | 錯誤與告警紀錄 |
 
 ## Error Logging & Alerts
 

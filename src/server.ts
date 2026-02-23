@@ -19,7 +19,7 @@ import { updateWorker } from "./modules/board/workers/updateWorker";
 import { startBot, stopBot } from "./modules/broadcast/channels/telegram";
 import { notifierWorker } from "./modules/notification/workers/notifierWorker";
 import { closeMatcherWorker } from "./modules/subscription/workers/matcherWorker";
-import { syncSubscriptions } from "./modules/user/services/syncService";
+import { seedArticleCache, syncSubscriptions } from "./modules/user/services/syncService";
 
 const logger = createLogger("SERVER");
 
@@ -34,6 +34,7 @@ async function bootstrap() {
   await connectDatabase();
   await connectRedis();
   await syncSubscriptions();
+  await seedArticleCache();
   await startScheduler();
   await startBot();
 

@@ -38,7 +38,7 @@
                     ▼                  ▼
              ┌─────────────┐   ┌──────────────┐
              │ fetchHtml() │   │filterNewArts │
-             │ (pttClient) │   │ (Redis ZSET) │
+             │ (pttClient) │   │ (Redis HASH) │
              └──────┬──────┘   └──────┬───────┘
                     │                 │
                     ▼                 ▼
@@ -121,12 +121,12 @@ for (const board of boards) {
 
 ### 9. 過濾新文章 (Filter New Articles)
 
-使用 Redis ZSET pipeline 進行 `zscore` 批次查詢，若 score 為 null 則代表該文章為新文章。
+透過 `board:latest` HASH 取得該看板最新文章的時間戳記，過濾掉時間戳記 ≤ 此值的文章。若看板無紀錄（首次爬取），所有文章均視為新文章。
 
 ### 10. 儲存與快取 (Save & Cache)
 
 - `insertNewArticles` → PostgreSQL (`createMany`, `skipDuplicates`)
-- `cacheArticles` → Redis ZADD (score = 時間戳記)
+- `cacheArticles` → Redis pipeline：ZADD `active:articles`（score = 時間戳記）+ HSET `board:latest`（更新最大時間戳記）
 
 ### 11. 抓取詳情頁面 (Fetch Detail Pages)
 
@@ -146,14 +146,14 @@ for (const board of boards) {
 updateQueue → updateWorker → updateActiveArticles()
 ```
 
-1. 從 DB 取得所有尚未過期的文章 (`expireAt > now`)
+1. 從 Redis `active:articles` ZSET 取得 24 小時內的文章代碼（`ZRANGEBYSCORE`）
 2. 重新抓取詳情 (`fetchDetail`)，比對推文數和內文是否有變化
 3. 若有變化 → 更新 DB
-4. 若回傳 404 → 標記文章已過期
+4. 若回傳 404 → 從 `active:articles` ZSET 移除該文章（`ZREM`）
 
 ## 錯誤處理
 
 - HTTP 錯誤 → 記錄至 `crawler_logs` 並向管理員發送 Telegram 告警
-- 404 → 使用 `ARTICLE_DELETED` 標記，並設定文章過期
+- 404 → 使用 `ARTICLE_DELETED` 標記，從 Redis `active:articles` 移除
 - 其他錯誤 → 回傳 null，跳過該文章
 - BullMQ 任務失敗 → 使用指數退避進行重試 (最多 3 次)

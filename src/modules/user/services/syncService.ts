@@ -1,7 +1,13 @@
 import { createLogger } from "../../../core/logger";
 import { getPrisma } from "../../../core/prisma";
 import { redis } from "../../../core/redis";
-import { cacheArticles, isCacheEmpty } from "../../board/services/articleCache";
+import {
+  addActiveArticles,
+  cacheArticles,
+  hasLatestTimestamp,
+  removeLatestTimestamp,
+  setLatestTimestamp,
+} from "../../board/services/articleCache";
 import { fetchHtml } from "../../board/services/htmlFetcher";
 
 const logger = createLogger("SERVER");
@@ -100,6 +106,61 @@ export async function syncSubscriptions(): Promise<void> {
 }
 
 /**
+ * Seed article cache from DB on startup.
+ * Populates board:latest HASH and active:articles ZSET for all subscribed boards.
+ * Must be called after syncSubscriptions() so the boards SET is available.
+ */
+export async function seedArticleCache(): Promise<void> {
+  const boards = await redis.smembers(BOARDS_KEY);
+  if (boards.length === 0) {
+    logger.info("Seed skipped: no subscribed boards");
+    return;
+  }
+
+  // Query recent articles (last 24h) for subscribed boards
+  const cutoff = BigInt(Math.floor(Date.now() / 1000) - 24 * 60 * 60);
+
+  const articles = await getPrisma().article.findMany({
+    where: {
+      board: { in: boards },
+      timestamp: { gte: cutoff },
+    },
+    select: { code: true, board: true, timestamp: true },
+  });
+
+  if (articles.length === 0) {
+    logger.info("Seed skipped: no recent articles in DB");
+    return;
+  }
+
+  // Group by board to find max timestamp per board
+  const boardMaxTs = new Map<string, number>();
+  const activeItems: { board: string; code: string; timestamp: number }[] = [];
+
+  for (const article of articles) {
+    const ts = Number(article.timestamp);
+    activeItems.push({ board: article.board, code: article.code, timestamp: ts });
+
+    const current = boardMaxTs.get(article.board) ?? 0;
+    if (ts > current) {
+      boardMaxTs.set(article.board, ts);
+    }
+  }
+
+  // Write board:latest HASH entries
+  for (const [board, maxTs] of boardMaxTs) {
+    await setLatestTimestamp(board, maxTs);
+  }
+
+  // Write active:articles ZSET entries
+  await addActiveArticles(activeItems);
+
+  logger.info(
+    `Seed completed: ${boardMaxTs.size} boards, ${articles.length} articles loaded to Redis`,
+  );
+}
+
+/**
  * Add a subscription to Redis (real-time sync).
  * Called after writing to DB when a user adds a subscription.
  *
@@ -112,11 +173,11 @@ export async function addSubscriptionToRedis(
   board: string,
   keyword: string,
 ): Promise<void> {
-  // Seed article cache if this board has no cache yet,
+  // Seed article cache if this board has no latest entry yet,
   // so existing articles won't be treated as "new" on next crawl.
   // Uses Redis SET NX as a distributed lock to prevent duplicate seeding.
-  const empty = await isCacheEmpty(board);
-  if (empty) {
+  const exists = await hasLatestTimestamp(board);
+  if (!exists) {
     const lockKey = `lock:seed:${board}`;
     const acquired = await redis.set(lockKey, "1", "EX", 30, "NX");
     if (acquired) {
@@ -165,8 +226,9 @@ export async function removeSubscriptionFromRedis(
     // Check if anyone still subscribes to this board
     const boardSubs = await redis.scard(subsKey(board));
     if (boardSubs === 0) {
-      // Remove board from boards set
+      // Remove board from boards set and clean up board:latest HASH
       await redis.srem(BOARDS_KEY, board);
+      await removeLatestTimestamp(board);
     }
   }
 

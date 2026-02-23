@@ -2,14 +2,14 @@ import { Queue } from "bullmq";
 
 import { createLogger } from "../../../core/logger";
 import { bullmqConnection } from "../../../core/queue";
-import {
-  expireArticle,
-  getActiveArticles,
-  insertNewArticles,
-  updateArticleDetail,
-} from "../repositories/articleRepository";
+import { insertNewArticles, updateArticleDetail } from "../repositories/articleRepository";
 import type { RawArticle } from "../types/article";
-import { cacheArticles, filterNewArticles } from "./articleCache";
+import {
+  cacheArticles,
+  filterNewArticles,
+  getActiveArticleCodes,
+  removeActiveArticle,
+} from "./articleCache";
 import { ARTICLE_DELETED, fetchDetail } from "./detailFetcher";
 import { fetchHtml } from "./htmlFetcher";
 
@@ -50,7 +50,7 @@ export async function fetchNewArticles(boardName: string): Promise<RawArticle[]>
     return [];
   }
 
-  // Filter new articles via Redis ZSET
+  // Filter new articles via Redis HASH timestamp comparison
   const newArticles = await filterNewArticles(boardName, articles);
 
   if (newArticles.length === 0) {
@@ -62,7 +62,7 @@ export async function fetchNewArticles(boardName: string): Promise<RawArticle[]>
   const count = await insertNewArticles(newArticles);
   logger.info(`${boardName}: ${count} new articles saved`);
 
-  // Update Redis cache
+  // Update Redis cache (board:latest HASH + active:articles ZSET)
   await cacheArticles(boardName, newArticles);
 
   // Fetch detail pages for new articles (concurrent)
@@ -87,13 +87,13 @@ export async function fetchNewArticles(boardName: string): Promise<RawArticle[]>
 }
 
 /**
- * Update detail data for all active articles (within expiry window).
+ * Update detail data for all active articles (within 24h window in Redis).
  * Skips articles where push counts and content have not changed.
  *
  * @returns Number of articles updated.
  */
 export async function updateActiveArticles(): Promise<number> {
-  const articles = await getActiveArticles();
+  const articles = await getActiveArticleCodes();
 
   if (articles.length === 0) {
     logger.debug("No active articles to update");
@@ -111,7 +111,7 @@ export async function updateActiveArticles(): Promise<number> {
         const detail = await fetchDetail(article.link);
 
         if (detail === ARTICLE_DELETED) {
-          await expireArticle(article.code);
+          await removeActiveArticle(article.board, article.code);
           expired++;
           return;
         }
@@ -151,7 +151,7 @@ async function fetchDetailsForArticles(articles: RawArticle[]): Promise<void> {
         const detail = await fetchDetail(article.link);
 
         if (detail === ARTICLE_DELETED) {
-          await expireArticle(article.code);
+          await removeActiveArticle(article.board, article.code);
           return;
         }
 

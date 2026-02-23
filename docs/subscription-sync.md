@@ -15,7 +15,8 @@
   │
   ├── connectDatabase()
   ├── connectRedis()       ← flushall（清除舊資料）
-  ├── syncSubscriptions()  ← 全量同步
+  ├── syncSubscriptions()  ← 全量同步訂閱
+  ├── seedArticleCache()   ← 從 DB 回填 24h 內文章至 Redis
   ├── startScheduler()
   └── startBot()
 ```
@@ -62,14 +63,14 @@ handleAdd (Bot handler)
   ├── addSubscription()        → PostgreSQL INSERT
   └── addSubscriptionToRedis() → Redis 同步
         │
-        ├── isCacheEmpty(board)?
+        ├── HEXISTS board:latest {board}?
         │   │
-        │   ├── 是：植入快取 (Seed Cache)
+        │   ├── 否：植入快取 (Seed Cache)
         │   │   ├── fetchHtml(board) → 抓取目前看板文章
-        │   │   └── cacheArticles()  → 寫入 Redis ZSET
+        │   │   └── cacheArticles()  → ZADD active:articles + HSET board:latest
         │   │   (避免既有文章被視為「新文章」而誤報)
         │   │
-        │   └── 否：跳過植入
+        │   └── 是：跳過植入（看板已有時間基準）
         │
         └── Redis pipeline:
             SADD boards {board}
@@ -96,7 +97,8 @@ handleDelete (Bot handler)
         │       └── SCARD keyword:{board}:subs
         │           │
         │           └── 0 (該看板已無任何訂閱者)：
-        │               └── SREM boards {board}
+        │               ├── SREM boards {board}
+        │               └── HDEL board:latest {board}
         │
         └── > 0：完成 (使用者仍有該看板的其他關鍵字)
 ```
@@ -111,6 +113,7 @@ handleDelete (Bot handler)
       └── 是：從看板訂閱者集合中移除使用者
           └── 該看板是否已無任何訂閱者？
               └── 是：從看板列表集合中移除該看板
+                  + 從 board:latest HASH 移除該看板
                   (排程器將停止爬取此看板)
 ```
 
@@ -121,15 +124,37 @@ handleDelete (Bot handler)
 | `boards` | SET | 所有有訂閱者的看板 |
 | `keyword:{board}:subs` | SET | 訂閱某看板的所有使用者 ID |
 | `user:{userId}:board:{board}` | SET | 某使用者在某看板的所有關鍵字 |
-| `board:{board}:articles` | ZSET | 文章快取（score = 時間戳記） |
+| `board:latest` | HASH | 各看板最新文章時間戳記（field = 看板名稱） |
+| `active:articles` | ZSET | 24h 內活躍文章（score = 時間戳記，member = `{board}:{code}`） |
 
 ## 快取植入 (Cache Seeding)
 
-當新增一個全新看板的訂閱時，文章快取是空的。若不預先植入文章，下次爬蟲會將看板內的所有既有文章視為「新文章」，導致大量誤報通知。
+### 即時植入 — 新增訂閱時
+
+當新增一個全新看板的訂閱時，`board:latest` HASH 中無該看板紀錄。若不預先植入，下次爬蟲會將看板內的所有既有文章視為「新文章」，導致大量誤報通知。
 
 植入流程：
-1. `isCacheEmpty(board)` → `zcard board:{board}:articles === 0`
-2. `fetchHtml(board)` → 抓取看板當前的文章
-3. `cacheArticles(board, articles)` → 寫入 Redis ZSET
+1. `hasLatestTimestamp(board)` → `HEXISTS board:latest {board}`
+2. 若不存在：`fetchHtml(board)` → 抓取看板當前的文章
+3. `cacheArticles(board, articles)` → ZADD `active:articles` + HSET `board:latest`
 
 若 `fetchHtml` 失敗（例如看板名稱錯誤但 `boardValidator` 未攔截），系統會發出警告但不會中斷流程，訂閱仍會成功建立。
+
+### 啟動植入 — 伺服器重啟時
+
+伺服器重啟時 `connectRedis()` 執行 `flushall`，Redis 資料全部清空。`seedArticleCache()` 從 DB 回填最近 24 小時的文章：
+
+```
+seedArticleCache()
+  │
+  ├── redis.smembers("boards") → 取得所有訂閱看板
+  ├── prisma.article.findMany({ timestamp >= 24h前 }) → 查詢 DB
+  │
+  ├── 計算每個看板的最大 timestamp
+  │   └── HSET board:latest {board} {maxTimestamp}
+  │
+  └── 寫入所有文章至 active:articles ZSET
+      └── ZADD active:articles {timestamp} {board}:{code}
+```
+
+確保重啟後 updateWorker 能繼續追蹤推文，且不會重複推播舊文章。

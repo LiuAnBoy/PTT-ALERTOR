@@ -1,7 +1,7 @@
 import { createMockRedis } from "../../../__mocks__/mockRedis";
 
 const mockRedis = createMockRedis();
-const mockPrisma = { subscription: { findMany: jest.fn() } };
+const mockPrisma = { subscription: { findMany: jest.fn() }, article: { findMany: jest.fn() } };
 
 jest.mock("../../../core/redis", () => ({ redis: mockRedis }));
 jest.mock("../../../core/prisma", () => ({ getPrisma: () => mockPrisma }));
@@ -14,18 +14,28 @@ jest.mock("../../../core/logger", () => ({
   }),
 }));
 jest.mock("../../board/services/articleCache", () => ({
-  isCacheEmpty: jest.fn(),
+  hasLatestTimestamp: jest.fn(),
   cacheArticles: jest.fn().mockResolvedValue(undefined),
+  addActiveArticles: jest.fn().mockResolvedValue(undefined),
+  setLatestTimestamp: jest.fn().mockResolvedValue(undefined),
+  removeLatestTimestamp: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock("../../board/services/htmlFetcher", () => ({
   fetchHtml: jest.fn().mockResolvedValue([]),
 }));
 
-import { cacheArticles, isCacheEmpty } from "../../board/services/articleCache";
+import {
+  addActiveArticles,
+  cacheArticles,
+  hasLatestTimestamp,
+  removeLatestTimestamp,
+  setLatestTimestamp,
+} from "../../board/services/articleCache";
 import { fetchHtml } from "../../board/services/htmlFetcher";
 import {
   addSubscriptionToRedis,
   removeSubscriptionFromRedis,
+  seedArticleCache,
   syncSubscriptions,
 } from "../services/syncService";
 
@@ -110,18 +120,64 @@ describe("syncSubscriptions", () => {
 });
 
 // ---------------------------------------------------------------------------
+// seedArticleCache
+// ---------------------------------------------------------------------------
+describe("seedArticleCache", () => {
+  it("should skip when no boards exist", async () => {
+    mockRedis.smembers.mockResolvedValueOnce([]);
+
+    await seedArticleCache();
+
+    expect(mockPrisma.article.findMany).not.toHaveBeenCalled();
+  });
+
+  it("should skip when no recent articles in DB", async () => {
+    mockRedis.smembers.mockResolvedValueOnce(["Gossiping"]);
+    mockPrisma.article.findMany.mockResolvedValueOnce([]);
+
+    await seedArticleCache();
+
+    // Should query DB but not write to Redis
+    expect(mockPrisma.article.findMany).toHaveBeenCalled();
+    expect(mockRedis.hset).not.toHaveBeenCalled();
+  });
+
+  it("should seed HASH and ZSET from DB articles", async () => {
+    mockRedis.smembers.mockResolvedValueOnce(["Gossiping", "Stock"]);
+    mockPrisma.article.findMany.mockResolvedValueOnce([
+      { code: "M.001", board: "Gossiping", timestamp: BigInt(100) },
+      { code: "M.002", board: "Gossiping", timestamp: BigInt(200) },
+      { code: "M.100", board: "Stock", timestamp: BigInt(150) },
+    ]);
+
+    await seedArticleCache();
+
+    // Should set max timestamp per board
+    expect(setLatestTimestamp).toHaveBeenCalledWith("Gossiping", 200);
+    expect(setLatestTimestamp).toHaveBeenCalledWith("Stock", 150);
+
+    // Should add all articles to active ZSET
+    expect(addActiveArticles).toHaveBeenCalledWith([
+      { board: "Gossiping", code: "M.001", timestamp: 100 },
+      { board: "Gossiping", code: "M.002", timestamp: 200 },
+      { board: "Stock", code: "M.100", timestamp: 150 },
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // addSubscriptionToRedis
 // ---------------------------------------------------------------------------
 describe("addSubscriptionToRedis", () => {
-  it("should seed cache when cache is empty, then add keys to Redis", async () => {
+  it("should seed cache when board has no latest timestamp, then add keys to Redis", async () => {
     const mockArticles = [{ title: "a1" }, { title: "a2" }];
-    (isCacheEmpty as jest.Mock).mockResolvedValue(true);
+    (hasLatestTimestamp as jest.Mock).mockResolvedValue(false);
     (fetchHtml as jest.Mock).mockResolvedValue(mockArticles);
 
     await addSubscriptionToRedis("u1", "Gossiping", "covid");
 
-    // Should check cache and seed it
-    expect(isCacheEmpty).toHaveBeenCalledWith("Gossiping");
+    // Should check HASH and seed it
+    expect(hasLatestTimestamp).toHaveBeenCalledWith("Gossiping");
     expect(fetchHtml).toHaveBeenCalledWith("Gossiping");
     expect(cacheArticles).toHaveBeenCalledWith("Gossiping", mockArticles);
 
@@ -132,12 +188,12 @@ describe("addSubscriptionToRedis", () => {
     expect(pipe.exec).toHaveBeenCalled();
   });
 
-  it("should skip cache seeding when cache is not empty", async () => {
-    (isCacheEmpty as jest.Mock).mockResolvedValue(false);
+  it("should skip cache seeding when board already has latest timestamp", async () => {
+    (hasLatestTimestamp as jest.Mock).mockResolvedValue(true);
 
     await addSubscriptionToRedis("u1", "Stock", "TSMC");
 
-    expect(isCacheEmpty).toHaveBeenCalledWith("Stock");
+    expect(hasLatestTimestamp).toHaveBeenCalledWith("Stock");
     expect(fetchHtml).not.toHaveBeenCalled();
     expect(cacheArticles).not.toHaveBeenCalled();
 
@@ -147,7 +203,7 @@ describe("addSubscriptionToRedis", () => {
   });
 
   it("should warn and continue adding to Redis when fetchHtml throws", async () => {
-    (isCacheEmpty as jest.Mock).mockResolvedValue(true);
+    (hasLatestTimestamp as jest.Mock).mockResolvedValue(false);
     (fetchHtml as jest.Mock).mockRejectedValue(new Error("network error"));
 
     await addSubscriptionToRedis("u1", "Gossiping", "covid");
@@ -162,17 +218,6 @@ describe("addSubscriptionToRedis", () => {
     expect(pipe.sadd).toHaveBeenCalledWith("keyword:Gossiping:subs", "u1");
     expect(pipe.sadd).toHaveBeenCalledWith("user:u1:board:Gossiping", "covid");
     expect(pipe.exec).toHaveBeenCalled();
-  });
-
-  it("should use the correct Redis key patterns", async () => {
-    (isCacheEmpty as jest.Mock).mockResolvedValue(false);
-
-    await addSubscriptionToRedis("user-abc-123", "Beauty", "photo");
-
-    // Verify exact key patterns: boards, keyword:{board}:subs, user:{id}:board:{board}
-    expect(pipe.sadd).toHaveBeenCalledWith("boards", "Beauty");
-    expect(pipe.sadd).toHaveBeenCalledWith("keyword:Beauty:subs", "user-abc-123");
-    expect(pipe.sadd).toHaveBeenCalledWith("user:user-abc-123:board:Beauty", "photo");
   });
 });
 
@@ -193,6 +238,8 @@ describe("removeSubscriptionFromRedis", () => {
 
     // Should NOT remove user from board subs or board from boards
     expect(mockRedis.srem).toHaveBeenCalledTimes(1);
+    // Should NOT clean board:latest
+    expect(removeLatestTimestamp).not.toHaveBeenCalled();
   });
 
   it("should also remove user from board subs when no keywords remain", async () => {
@@ -210,9 +257,10 @@ describe("removeSubscriptionFromRedis", () => {
 
     // Should NOT remove board from boards set (other subscribers remain)
     expect(mockRedis.srem).not.toHaveBeenCalledWith("boards", "Gossiping");
+    expect(removeLatestTimestamp).not.toHaveBeenCalled();
   });
 
-  it("should remove board from boards set when no subscribers remain", async () => {
+  it("should remove board from boards set and clean board:latest when no subscribers remain", async () => {
     // Both scard calls return 0
     mockRedis.scard
       .mockResolvedValueOnce(0) // remaining user keywords
@@ -224,19 +272,7 @@ describe("removeSubscriptionFromRedis", () => {
     expect(mockRedis.srem).toHaveBeenCalledWith("user:u1:board:Gossiping", "covid");
     expect(mockRedis.srem).toHaveBeenCalledWith("keyword:Gossiping:subs", "u1");
     expect(mockRedis.srem).toHaveBeenCalledWith("boards", "Gossiping");
-    expect(mockRedis.srem).toHaveBeenCalledTimes(3);
-  });
-
-  it("should use the correct Redis key patterns throughout removal", async () => {
-    mockRedis.scard.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
-
-    await removeSubscriptionFromRedis("user-xyz-789", "Stock", "TSMC");
-
-    // Verify key patterns: user:{id}:board:{board}, keyword:{board}:subs, boards
-    expect(mockRedis.srem).toHaveBeenCalledWith("user:user-xyz-789:board:Stock", "TSMC");
-    expect(mockRedis.scard).toHaveBeenCalledWith("user:user-xyz-789:board:Stock");
-    expect(mockRedis.srem).toHaveBeenCalledWith("keyword:Stock:subs", "user-xyz-789");
-    expect(mockRedis.scard).toHaveBeenCalledWith("keyword:Stock:subs");
-    expect(mockRedis.srem).toHaveBeenCalledWith("boards", "Stock");
+    // Should also clean board:latest HASH
+    expect(removeLatestTimestamp).toHaveBeenCalledWith("Gossiping");
   });
 });

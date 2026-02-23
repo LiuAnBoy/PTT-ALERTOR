@@ -40,7 +40,6 @@ describe("CrawlerService", () => {
     expect(first).not.toBeNull();
     expect(first!.title).toBeTruthy();
     expect(first!.board).toBe(BOARD);
-    expect(first!.expireAt).toBeInstanceOf(Date);
     expect(first!.content).toBeTruthy();
     expect(first!.ip).toBeTruthy();
     expect(typeof first!.positive).toBe("number");
@@ -56,8 +55,6 @@ describe("CrawlerService", () => {
     console.log(
       `  comments: ${Array.isArray(first!.comments) ? (first!.comments as unknown[]).length : 0} 則`,
     );
-    console.log(`  expireAt: ${first!.expireAt.toISOString()}`);
-
     // Verify Redis cache
     const cachedCount = await redis.zcard(CACHE_KEY);
     expect(cachedCount).toBe(articles.length);

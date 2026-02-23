@@ -1,42 +1,24 @@
+import { cleanActiveArticles } from "../modules/board/services/articleCache";
 import { createLogger } from "./logger";
 import { getPrisma } from "./prisma";
-import { redis } from "./redis";
 
 const logger = createLogger("MAINTENANCE");
 
-const ARTICLE_RETENTION_DAYS = 7;
 const LOG_RETENTION_DAYS = 30;
+
+/** Cleanup window for active articles ZSET (24 hours). */
+const ACTIVE_ARTICLES_WINDOW_SECONDS = 24 * 60 * 60;
 
 /**
  * Run all maintenance cleanup tasks.
- * - Delete articles older than 7 days
- * - Clean expired Redis article caches
+ * - Clean expired Redis active articles (older than 24h)
  * - Delete crawler logs older than 30 days
  */
 export async function runCleanup(): Promise<void> {
-  const articlesDeleted = await cleanupArticles();
+  const redisCleanCount = await cleanupRedisCache();
   const logsDeleted = await cleanupLogs();
-  await cleanupRedisCache();
 
-  logger.info(`Cleanup done: ${articlesDeleted} articles, ${logsDeleted} logs removed`);
-}
-
-/**
- * Delete articles older than ARTICLE_RETENTION_DAYS.
- * @returns Number of articles deleted.
- */
-async function cleanupArticles(): Promise<number> {
-  const cutoff = new Date(Date.now() - ARTICLE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
-
-  const result = await getPrisma().article.deleteMany({
-    where: { createdAt: { lt: cutoff } },
-  });
-
-  if (result.count > 0) {
-    logger.debug(`Deleted ${result.count} articles older than ${ARTICLE_RETENTION_DAYS} days`);
-  }
-
-  return result.count;
+  logger.info(`Cleanup done: ${redisCleanCount} Redis entries, ${logsDeleted} logs removed`);
 }
 
 /**
@@ -58,23 +40,17 @@ async function cleanupLogs(): Promise<number> {
 }
 
 /**
- * Clean expired entries from all board article Redis ZSET caches.
- * Removes entries with timestamp older than ARTICLE_RETENTION_DAYS.
+ * Clean expired entries from the active articles Redis ZSET.
+ * Removes entries with timestamp older than 24 hours.
+ * @returns Number of entries removed.
  */
-async function cleanupRedisCache(): Promise<void> {
-  const cutoffTimestamp = Math.floor(
-    (Date.now() - ARTICLE_RETENTION_DAYS * 24 * 60 * 60 * 1000) / 1000,
-  );
+async function cleanupRedisCache(): Promise<number> {
+  const cutoffTimestamp = Math.floor(Date.now() / 1000) - ACTIVE_ARTICLES_WINDOW_SECONDS;
+  const count = await cleanActiveArticles(cutoffTimestamp);
 
-  // Find all board cache keys
-  const keys = await redis.keys("board:*:articles");
-  if (keys.length === 0) return;
-
-  const pipe = redis.pipeline();
-  for (const key of keys) {
-    pipe.zremrangebyscore(key, "-inf", cutoffTimestamp);
+  if (count > 0) {
+    logger.debug(`Cleaned ${count} expired entries from active articles cache`);
   }
-  await pipe.exec();
 
-  logger.debug(`Cleaned Redis cache for ${keys.length} boards`);
+  return count;
 }

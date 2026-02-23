@@ -11,6 +11,8 @@ export function createMockRedis() {
     srem: jest.fn().mockReturnThis(),
     smembers: jest.fn().mockReturnThis(),
     del: jest.fn().mockReturnThis(),
+    zrangebyscore: jest.fn().mockReturnThis(),
+    hset: jest.fn().mockReturnThis(),
   };
 
   return {
@@ -23,9 +25,14 @@ export function createMockRedis() {
     zcard: jest.fn().mockResolvedValue(0),
     zadd: jest.fn().mockResolvedValue(1),
     zscore: jest.fn().mockResolvedValue(null),
+    zrem: jest.fn().mockResolvedValue(1),
     zrangebyscore: jest.fn().mockResolvedValue([]),
     zremrangebyscore: jest.fn().mockResolvedValue(0),
     del: jest.fn().mockResolvedValue(1),
+    hget: jest.fn().mockResolvedValue(null),
+    hset: jest.fn().mockResolvedValue(1),
+    hdel: jest.fn().mockResolvedValue(1),
+    hexists: jest.fn().mockResolvedValue(0),
     pipeline: jest.fn().mockReturnValue(mockPipeline),
     /** Access the mock pipeline for assertions. */
     _mockPipeline: mockPipeline,

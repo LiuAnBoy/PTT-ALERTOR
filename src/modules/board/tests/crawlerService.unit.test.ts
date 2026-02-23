@@ -26,6 +26,8 @@ jest.mock("../services/htmlFetcher", () => ({ fetchHtml: jest.fn() }));
 jest.mock("../services/articleCache", () => ({
   filterNewArticles: jest.fn(),
   cacheArticles: jest.fn().mockResolvedValue(undefined),
+  getActiveArticleCodes: jest.fn(),
+  removeActiveArticle: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock("../services/detailFetcher", () => ({
   ARTICLE_DELETED: Symbol("ARTICLE_DELETED"),
@@ -33,20 +35,18 @@ jest.mock("../services/detailFetcher", () => ({
 }));
 jest.mock("../repositories/articleRepository", () => ({
   insertNewArticles: jest.fn().mockResolvedValue(1),
-  getActiveArticles: jest.fn(),
-  expireArticle: jest.fn().mockResolvedValue(undefined),
   updateArticleDetail: jest.fn(),
 }));
 
 // ── Imports (after mocks) ────────────────────────────────────────────────────
 
+import { insertNewArticles, updateArticleDetail } from "../repositories/articleRepository";
 import {
-  expireArticle,
-  getActiveArticles,
-  insertNewArticles,
-  updateArticleDetail,
-} from "../repositories/articleRepository";
-import { cacheArticles, filterNewArticles } from "../services/articleCache";
+  cacheArticles,
+  filterNewArticles,
+  getActiveArticleCodes,
+  removeActiveArticle,
+} from "../services/articleCache";
 import { fetchNewArticles, updateActiveArticles } from "../services/crawlerService";
 import { ARTICLE_DELETED, fetchDetail } from "../services/detailFetcher";
 import { fetchHtml } from "../services/htmlFetcher";
@@ -56,8 +56,8 @@ const mockFilterNewArticles = filterNewArticles as jest.Mock;
 const mockCacheArticles = cacheArticles as jest.Mock;
 const mockFetchDetail = fetchDetail as jest.Mock;
 const mockInsertNewArticles = insertNewArticles as jest.Mock;
-const mockGetActiveArticles = getActiveArticles as jest.Mock;
-const mockExpireArticle = expireArticle as jest.Mock;
+const mockGetActiveArticleCodes = getActiveArticleCodes as jest.Mock;
+const mockRemoveActiveArticle = removeActiveArticle as jest.Mock;
 const mockUpdateArticleDetail = updateArticleDetail as jest.Mock;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -182,8 +182,17 @@ describe("fetchNewArticles", () => {
 // ---- updateActiveArticles ---------------------------------------------------
 
 describe("updateActiveArticles", () => {
+  /** Build a { code, board, link } fixture matching getActiveArticleCodes() return type. */
+  function makeActiveArticle(code: string, board = "Gossiping") {
+    return {
+      code,
+      board,
+      link: `https://www.ptt.cc/bbs/${board}/${code}.html`,
+    };
+  }
+
   it("should return 0 when there are no active articles", async () => {
-    mockGetActiveArticles.mockResolvedValueOnce([]);
+    mockGetActiveArticleCodes.mockResolvedValueOnce([]);
 
     const result = await updateActiveArticles();
 
@@ -192,8 +201,8 @@ describe("updateActiveArticles", () => {
   });
 
   it("should call updateArticleDetail and return count of changed articles", async () => {
-    const articles = [makeArticle("M.100"), makeArticle("M.101")];
-    mockGetActiveArticles.mockResolvedValueOnce(articles);
+    const articles = [makeActiveArticle("M.100"), makeActiveArticle("M.101")];
+    mockGetActiveArticleCodes.mockResolvedValueOnce(articles);
 
     const detail = {
       ip: "5.6.7.8",
@@ -215,9 +224,9 @@ describe("updateActiveArticles", () => {
     expect(mockUpdateArticleDetail).toHaveBeenCalledWith("M.101", detail);
   });
 
-  it("should call expireArticle when fetchDetail returns ARTICLE_DELETED", async () => {
-    const articles = [makeArticle("M.200"), makeArticle("M.201")];
-    mockGetActiveArticles.mockResolvedValueOnce(articles);
+  it("should call removeActiveArticle when fetchDetail returns ARTICLE_DELETED", async () => {
+    const articles = [makeActiveArticle("M.200"), makeActiveArticle("M.201")];
+    mockGetActiveArticleCodes.mockResolvedValueOnce(articles);
 
     // First article deleted, second has valid detail
     mockFetchDetail.mockResolvedValueOnce(ARTICLE_DELETED).mockResolvedValueOnce({
@@ -232,16 +241,16 @@ describe("updateActiveArticles", () => {
 
     const result = await updateActiveArticles();
 
-    expect(mockExpireArticle).toHaveBeenCalledTimes(1);
-    expect(mockExpireArticle).toHaveBeenCalledWith("M.200");
+    expect(mockRemoveActiveArticle).toHaveBeenCalledTimes(1);
+    expect(mockRemoveActiveArticle).toHaveBeenCalledWith("Gossiping", "M.200");
     // Only the second article was updated
     expect(mockUpdateArticleDetail).toHaveBeenCalledTimes(1);
     expect(result).toBe(1);
   });
 
   it("should skip article when fetchDetail returns null", async () => {
-    const articles = [makeArticle("M.300"), makeArticle("M.301")];
-    mockGetActiveArticles.mockResolvedValueOnce(articles);
+    const articles = [makeActiveArticle("M.300"), makeActiveArticle("M.301")];
+    mockGetActiveArticleCodes.mockResolvedValueOnce(articles);
 
     // First returns null, second returns valid detail
     mockFetchDetail.mockResolvedValueOnce(null).mockResolvedValueOnce({
@@ -263,7 +272,7 @@ describe("updateActiveArticles", () => {
       "M.301",
       expect.objectContaining({ ip: "9.9.9.9" }),
     );
-    // expireArticle should not be called (null is not ARTICLE_DELETED)
-    expect(mockExpireArticle).not.toHaveBeenCalled();
+    // removeActiveArticle should not be called (null is not ARTICLE_DELETED)
+    expect(mockRemoveActiveArticle).not.toHaveBeenCalled();
   });
 });

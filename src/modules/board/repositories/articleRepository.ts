@@ -1,20 +1,14 @@
-import { dayjs } from "../../../core/dayjs";
 import { prisma } from "../../../core/prisma";
 import { logError } from "../../user/services/errorLogger";
 import type { ArticleDetail, RawArticle } from "../types/article";
 
-const EXPIRE_DAYS = 3;
-
 /**
  * Insert only new articles to the database. Existing articles are skipped.
- * Sets expireAt to createdAt + EXPIRE_DAYS.
  * @param articles - Array of raw articles to persist.
  * @returns Number of new articles inserted.
  */
 export async function insertNewArticles(articles: RawArticle[]): Promise<number> {
   if (articles.length === 0) return 0;
-
-  const expireAt = dayjs().add(EXPIRE_DAYS, "day").toDate();
 
   try {
     const result = await prisma.article.createMany({
@@ -26,7 +20,6 @@ export async function insertNewArticles(articles: RawArticle[]): Promise<number>
         author: article.author,
         board: article.board,
         pushSum: article.pushSum,
-        expireAt,
       })),
       skipDuplicates: true,
     });
@@ -40,29 +33,6 @@ export async function insertNewArticles(articles: RawArticle[]): Promise<number>
     });
     throw err;
   }
-}
-
-/**
- * Get all articles that are still within the update window (expireAt > now).
- * @returns Array of articles with code and link.
- */
-export async function getActiveArticles(): Promise<{ code: string; link: string }[]> {
-  return prisma.article.findMany({
-    where: { expireAt: { gt: new Date() } },
-    select: { code: true, link: true },
-  });
-}
-
-/**
- * Expire an article immediately by setting expireAt to now.
- * Used when the article is confirmed deleted (404).
- * @param code - The article code (primary key).
- */
-export async function expireArticle(code: string): Promise<void> {
-  await prisma.article.update({
-    where: { code },
-    data: { expireAt: new Date() },
-  });
 }
 
 /**

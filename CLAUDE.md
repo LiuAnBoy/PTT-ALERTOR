@@ -57,8 +57,8 @@ Scheduler (cron) → dispatchWorker → crawlerWorker → matcherWorker → noti
 ```
 
 - **PostgreSQL**: source of truth (users, subscriptions, articles)
-- **Redis**: read cache (subscriptions) + article ZSET + BullMQ queues
-- Startup 時 `syncSubscriptions()` 將所有 DB 訂閱載入 Redis
+- **Redis**: read cache (subscriptions) + article tracking + BullMQ queues
+- Startup 時 `syncSubscriptions()` 載入訂閱，`seedArticleCache()` 從 DB 回填 24h 內文章至 Redis
 - 爬蟲和比對在 hot path 中完全從 Redis 讀取，零 DB 查詢
 
 ### Redis Key Patterns
@@ -68,7 +68,8 @@ Scheduler (cron) → dispatchWorker → crawlerWorker → matcherWorker → noti
 | `boards` | SET | All subscribed board names |
 | `keyword:{board}:subs` | SET | User IDs subscribed to a board |
 | `user:{userId}:board:{board}` | SET | User's keywords for a board |
-| `board:{board}:articles` | ZSET | Article cache (score = timestamp) |
+| `board:latest` | HASH | Latest article timestamp per board (field=board) |
+| `active:articles` | ZSET | Active articles in 24h window (score=timestamp, member=`{board}:{code}`) |
 
 ### Database Schema
 

@@ -77,11 +77,9 @@ model Article {
   comments  Json?
 
   createdAt   DateTime @default(now())
-  expireAt    DateTime
   lastUpdated DateTime @default(now()) @updatedAt
 
   @@index([board, timestamp])
-  @@index([expireAt])
   @@map("articles")
 }
 
