@@ -80,14 +80,12 @@ Scheduler (cron) → dispatchWorker → crawlerWorker → matcherWorker → noti
 pnpm server              # Dev server (nodemon + tsx, hot reload)
 pnpm build               # TypeScript compile
 pnpm start               # Production start
-pnpm test:unit           # Unit tests only (*.unit.test.ts, ~101 cases)
+pnpm test:unit           # Unit tests only (*.unit.test.ts, ~117 cases)
 pnpm test:integration    # Integration tests (requires DB/Redis)
 pnpm test:cov            # Coverage report
 pnpm lint                # ESLint check
 pnpm lint:fix            # ESLint auto-fix
 pnpm format              # Prettier format
-pnpm docker:up           # Start dev PostgreSQL + Redis
-pnpm docker:down         # Stop dev infrastructure
 ```
 
 ## Environment & Deployment
@@ -103,7 +101,7 @@ pnpm docker:down         # Stop dev infrastructure
 
 ### 部署方式
 
-- **Development**: `pnpm docker:up` → `npx prisma migrate dev` → `pnpm server`
+- **Development**: `npx prisma migrate dev` → `pnpm server`
 - **Production**: `docker compose up -d`（含 app + PostgreSQL + Redis，health check）
 - **deploy.sh**: `init` / `migrate` / `update` / `stop` / `status`
 
@@ -133,8 +131,8 @@ pnpm docker:down         # Stop dev infrastructure
 
 ### Testing
 
-- **Unit tests**: co-located as `<source>.unit.test.ts`, mock all external deps
-- **Integration tests**: in `modules/*/tests/`, hit real DB/Redis/PTT
+- **Unit tests**: in `modules/*/tests/` as `*.unit.test.ts`, mock all external deps
+- **Integration tests**: in `modules/*/tests/` as `*.integration.test.ts`, hit real DB/Redis/PTT
 - **Mock utilities**: `src/__mocks__/` — `createMockRedis()`, `createMockPrisma()`, `createMockBot()`, `createMockContext()`
 - **Mock pattern**: `jest.mock()` at file top before imports, `jest.clearAllMocks()` in `beforeEach`
 
