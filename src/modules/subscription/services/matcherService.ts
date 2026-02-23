@@ -56,8 +56,9 @@ export async function matchArticle(board: string, title: string): Promise<MatchR
 }
 
 /**
- * Check if an article title matches a keyword.
- * Supports plain text (case-insensitive) and regexp: prefix patterns.
+ * Check if an article title matches a keyword using regex.
+ * All keywords are treated as regex patterns. Invalid regex is auto-escaped for literal matching.
+ * Legacy keywords with "regexp:" prefix are handled for backward compatibility.
  *
  * @param title - The article title.
  * @param keyword - The keyword or regex pattern.
@@ -68,20 +69,16 @@ export async function matchArticle(board: string, title: string): Promise<MatchR
  * @internal Exported for unit testing only.
  */
 export function matchKeyword(title: string, keyword: string, userId: string): boolean {
-  if (keyword.startsWith("regexp:")) {
-    const pattern = keyword.slice(7);
-    const regex = getRegex(pattern);
-    if (!regex) {
-      logError("WARN", "MATCHER", `Regex compile failed: ${pattern}`, {
-        keyword,
-        userId,
-        errorMsg: `Invalid regex: ${pattern}`,
-      });
-      return false;
-    }
-    return regex.test(title);
+  // Backward compatibility: strip legacy regexp: prefix
+  const pattern = keyword.startsWith("regexp:") ? keyword.slice(7) : keyword;
+  const regex = getRegex(pattern);
+  if (!regex) {
+    logError("WARN", "MATCHER", `Regex compile failed: ${pattern}`, {
+      keyword,
+      userId,
+      errorMsg: `Unsafe regex: ${pattern}`,
+    });
+    return false;
   }
-
-  // Plain text: case-insensitive substring match
-  return title.toLowerCase().includes(keyword.toLowerCase());
+  return regex.test(title);
 }

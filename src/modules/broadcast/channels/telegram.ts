@@ -116,7 +116,10 @@ async function handleText(ctx: Context) {
   if (!cmdCtx || !cmdCtx.text) return;
 
   const parsed = parseCommand(cmdCtx.text);
-  if (!parsed) return;
+  if (!parsed) {
+    await ctx.reply("❌ 無法辨識的指令。輸入「幫助」查看可用指令。");
+    return;
+  }
 
   let result;
   switch (parsed.command) {

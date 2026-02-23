@@ -39,7 +39,7 @@ export async function executeStart(ctx: CommandContext): Promise<CommandResult> 
     "📋 清單 — 查看目前訂閱",
     "❓ 幫助 — 詳細使用說明",
     "",
-    "💡 範例：新增 Gossiping 問卦",
+    "💡 範例：新增 Gossiping 問卦|爆卦",
   ].join("\n");
 
   try {
@@ -83,15 +83,15 @@ export function executeHelp(): CommandResult {
     "  新增 Gossiping 問卦&爆卦&閒聊",
     "",
     "📌 正則表達式 (Regex)",
-    "  使用 regexp: 前綴啟用正則比對：",
-    "  新增 Gossiping regexp:問卦|爆卦",
-    "  新增 Stock regexp:台積電.*\\d+",
-    "  新增 NBA regexp:^(LBJ|Curry)",
+    "  所有關鍵字自動以正則比對（純文字也適用）：",
+    "  新增 Gossiping 問卦|爆卦",
+    "  新增 Stock 台積電.*\\d+",
+    "  新增 NBA ^(LBJ|Curry)",
     "",
     "⚠️ 注意事項",
     "  • 看板名稱區分大小寫（如 Gossiping, Stock）",
-    "  • 關鍵字比對不分大小寫（純文字模式）",
-    "  • Regex 模式請確認語法正確",
+    "  • 關鍵字比對不分大小寫",
+    "  • 無效的正則會自動視為純文字匹配",
   ].join("\n");
 
   return { reply: helpText };
@@ -158,19 +158,15 @@ export async function executeAdd(ctx: CommandContext, args: string): Promise<Com
 
   const results: string[] = [];
   for (const keyword of keywords) {
-    // Validate regex syntax and safety
-    if (keyword.startsWith("regexp:")) {
-      const pattern = keyword.slice(7);
-      try {
-        new RegExp(pattern);
-      } catch {
-        results.push(`❌ 關鍵字「${keyword}」的語法有誤，請檢查。`);
-        continue;
-      }
-      if (!isPatternSafe(pattern)) {
+    // Validate regex safety (only check ReDoS for valid regex patterns)
+    try {
+      new RegExp(keyword);
+      if (!isPatternSafe(keyword)) {
         results.push(`❌ 關鍵字「${keyword}」的正則過於複雜或過長，請簡化。`);
         continue;
       }
+    } catch {
+      // Invalid regex → will be auto-escaped for literal matching, no error needed
     }
 
     // Check for duplicate

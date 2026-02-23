@@ -5,9 +5,9 @@
 ## Features
 
 - **定時爬取** — 每分鐘抓取所有訂閱看板的最新文章
-- **關鍵字比對** — 支援純文字（不分大小寫）和正則表達式
+- **關鍵字比對** — 所有關鍵字統一以正則表達式匹配（不分大小寫），無效 regex 自動視為純文字
 - **即時推播** — 透過 Telegram Bot 推送通知，速率限制 30 msg/s
-- **多關鍵字訂閱** — 用 `&` 一次新增多個關鍵字，支援 `regexp:` 正則表達式
+- **多關鍵字訂閱** — 用 `&` 一次新增多個關鍵字
 - **自動清理** — 過期文章和 log 自動清除
 - **錯誤告警** — FATAL/ERROR 自動推送給 admin，可透過 `/errors` 查看
 
@@ -109,9 +109,12 @@ curl http://localhost:8000/health
 # 多關鍵字（& 分隔）
 新增 Gossiping 問卦&爆卦&閒聊
 
-# 正則表達式（regexp: 前綴）
-新增 Stock regexp:台積電.*\d+
-新增 NBA regexp:^(LBJ|Curry)
+# 正則表達式（直接使用，無需前綴）
+新增 Stock 台積電.*\d+
+新增 NBA ^(LBJ|Curry)
+
+# 無效 regex 自動視為純文字匹配
+新增 Soft_Job C++
 ```
 
 ## Architecture

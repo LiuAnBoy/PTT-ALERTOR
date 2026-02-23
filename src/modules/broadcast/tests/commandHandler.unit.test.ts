@@ -60,8 +60,10 @@ jest.mock("../../user/services/syncService", () => ({
   removeSubscriptionFromRedis: (...args: any[]) => mockRemoveFromRedis(...args),
 }));
 
+const mockIsPatternSafe = jest.fn().mockReturnValue(true);
+
 jest.mock("../../subscription/services/regexCache", () => ({
-  isPatternSafe: () => true,
+  isPatternSafe: (...args: any[]) => mockIsPatternSafe(...args),
 }));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -227,6 +229,43 @@ describe("executeAdd", () => {
     const result = await executeAdd(buildCtx(), "Gossiping 問卦");
 
     expect(result.reply).toContain("已訂閱過");
+  });
+
+  it("should save regex pattern directly without prefix", async () => {
+    mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
+    mockBoardExists.mockResolvedValue(true);
+    mockSubscriptionExists.mockResolvedValue(false);
+    mockAddSubscription.mockResolvedValue({});
+    mockAddToRedis.mockResolvedValue(undefined);
+
+    const result = await executeAdd(buildCtx(), "Gossiping 問卦|爆卦");
+
+    expect(result.reply).toContain("成功新增");
+    expect(mockAddSubscription).toHaveBeenCalledWith("user-1", "Gossiping", "問卦|爆卦");
+  });
+
+  it("should save invalid regex (like C++) without error", async () => {
+    mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
+    mockBoardExists.mockResolvedValue(true);
+    mockSubscriptionExists.mockResolvedValue(false);
+    mockAddSubscription.mockResolvedValue({});
+    mockAddToRedis.mockResolvedValue(undefined);
+
+    const result = await executeAdd(buildCtx(), "Gossiping C++");
+
+    expect(result.reply).toContain("成功新增");
+    expect(mockAddSubscription).toHaveBeenCalledWith("user-1", "Gossiping", "C++");
+  });
+
+  it("should reject unsafe regex pattern", async () => {
+    mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
+    mockBoardExists.mockResolvedValue(true);
+    mockIsPatternSafe.mockReturnValueOnce(false);
+
+    const result = await executeAdd(buildCtx(), "Gossiping (a+)+$");
+
+    expect(result.reply).toContain("正則過於複雜或過長");
+    expect(mockAddSubscription).not.toHaveBeenCalled();
   });
 });
 

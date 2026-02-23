@@ -17,7 +17,6 @@ jest.mock("../../user/services/errorLogger", () => ({
   logError: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { logError } from "../../user/services/errorLogger";
 import { matchArticle, matchKeyword } from "../services/matcherService";
 
 beforeEach(() => {
@@ -25,8 +24,8 @@ beforeEach(() => {
 });
 
 describe("matchKeyword", () => {
-  // Case 1: plain text case-insensitive match
-  it("should match plain text case-insensitively", () => {
+  // Case 1: plain text matches via regex (case-insensitive)
+  it("should match plain text case-insensitively via regex", () => {
     expect(matchKeyword("[問卦] 今天天氣好嗎", "問卦", "user1")).toBe(true);
     expect(matchKeyword("Re: [爆卦] Something", "爆卦", "user1")).toBe(true);
     expect(matchKeyword("HELLO World", "hello", "user1")).toBe(true);
@@ -38,28 +37,29 @@ describe("matchKeyword", () => {
     expect(matchKeyword("Hello World", "goodbye", "user1")).toBe(false);
   });
 
-  // Case 3: regexp prefix with valid pattern matches
-  it("should match with a valid regexp: prefix pattern", () => {
-    expect(matchKeyword("[問卦] 為什麼貓咪這麼可愛", "regexp:問卦.*貓", "user1")).toBe(true);
-    expect(matchKeyword("Re: [爆卦] 重大消息", "regexp:^Re:", "user1")).toBe(true);
+  // Case 3: regex pattern matches directly (no prefix needed)
+  it("should match with a regex pattern directly", () => {
+    expect(matchKeyword("[問卦] 為什麼貓咪這麼可愛", "問卦.*貓", "user1")).toBe(true);
+    expect(matchKeyword("Re: [爆卦] 重大消息", "^Re:", "user1")).toBe(true);
   });
 
-  // Case 4: regexp prefix with no match
-  it("should return false when regexp: pattern does not match", () => {
-    expect(matchKeyword("[問卦] 今天天氣好嗎", "regexp:^\\[爆卦\\]", "user1")).toBe(false);
+  // Case 4: regex pattern no match
+  it("should return false when regex pattern does not match", () => {
+    expect(matchKeyword("[問卦] 今天天氣好嗎", "^\\[爆卦\\]", "user1")).toBe(false);
+    expect(matchKeyword("Hello World", "^Goodbye", "user1")).toBe(false);
+  });
+
+  // Case 5: backward compatibility — legacy regexp: prefix still works
+  it("should strip legacy regexp: prefix and match correctly", () => {
+    expect(matchKeyword("[問卦] 為什麼貓咪這麼可愛", "regexp:問卦.*貓", "user1")).toBe(true);
+    expect(matchKeyword("Re: [爆卦] 重大消息", "regexp:^Re:", "user1")).toBe(true);
     expect(matchKeyword("Hello World", "regexp:^Goodbye", "user1")).toBe(false);
   });
 
-  // Case 5: regexp with invalid regex returns false and calls logError
-  it("should return false and call logError for invalid regex", () => {
-    const result = matchKeyword("test title", "regexp:[invalid", "user42");
-
-    expect(result).toBe(false);
-    expect(logError).toHaveBeenCalledWith("WARN", "MATCHER", "Regex compile failed: [invalid", {
-      keyword: "regexp:[invalid",
-      userId: "user42",
-      errorMsg: "Invalid regex: [invalid",
-    });
+  // Case 6: invalid regex auto-escapes for literal matching
+  it("should auto-escape invalid regex and match literally", () => {
+    expect(matchKeyword("I love C++", "C++", "user1")).toBe(true);
+    expect(matchKeyword("I love Java", "C++", "user1")).toBe(false);
   });
 });
 

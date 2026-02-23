@@ -1,4 +1,4 @@
-import { getRegex } from "../services/regexCache";
+import { escapeRegex, getRegex } from "../services/regexCache";
 
 describe("getRegex", () => {
   // Case 1: valid pattern returns a RegExp instance
@@ -16,10 +16,20 @@ describe("getRegex", () => {
     expect(first).toBe(second);
   });
 
-  // Case 3: invalid pattern returns null
-  it("should return null for an invalid regex pattern", () => {
+  // Case 3: invalid pattern auto-escapes for literal matching
+  it("should auto-escape invalid regex and return a RegExp", () => {
     const result = getRegex("[invalid");
-    expect(result).toBeNull();
+    expect(result).toBeInstanceOf(RegExp);
+    expect(result!.test("[invalid")).toBe(true);
+    expect(result!.test("valid")).toBe(false);
+  });
+
+  // Case 3b: invalid regex like C++ auto-escapes
+  it("should auto-escape C++ and return a RegExp for literal matching", () => {
+    const result = getRegex("C++");
+    expect(result).toBeInstanceOf(RegExp);
+    expect(result!.test("C++")).toBe(true);
+    expect(result!.test("C")).toBe(false);
   });
 
   // Case 4: empty string is a valid regex that matches everything
@@ -37,5 +47,25 @@ describe("getRegex", () => {
     expect(result!.test("foo")).toBe(true);
     expect(result!.test("BAR")).toBe(true);
     expect(result!.test("baz")).toBe(false);
+  });
+});
+
+describe("escapeRegex", () => {
+  it("should escape all special regex characters", () => {
+    expect(escapeRegex("C++")).toBe("C\\+\\+");
+    expect(escapeRegex("a.b")).toBe("a\\.b");
+    expect(escapeRegex("foo*bar")).toBe("foo\\*bar");
+    expect(escapeRegex("(test)")).toBe("\\(test\\)");
+    expect(escapeRegex("[abc]")).toBe("\\[abc\\]");
+    expect(escapeRegex("a{1,2}")).toBe("a\\{1,2\\}");
+    expect(escapeRegex("a|b")).toBe("a\\|b");
+    expect(escapeRegex("a\\b")).toBe("a\\\\b");
+    expect(escapeRegex("^start$")).toBe("\\^start\\$");
+    expect(escapeRegex("what?")).toBe("what\\?");
+  });
+
+  it("should return plain text unchanged", () => {
+    expect(escapeRegex("hello")).toBe("hello");
+    expect(escapeRegex("問卦")).toBe("問卦");
   });
 });

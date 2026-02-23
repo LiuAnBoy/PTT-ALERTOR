@@ -58,7 +58,7 @@ Flow:
 
 ```
 新增 Gossiping 問卦
-新增 Stock regexp:台積電.*\d+
+新增 Stock 台積電.*\d+           ← 支援正則表達式
 新增 Gossiping 問卦&爆卦&閒聊    ← 多關鍵字用 & 分隔
 ```
 
@@ -71,7 +71,7 @@ Flow:
   ├── boardExists(board)         ← 看板不存在 → 錯誤提示
   │
   └── for each keyword (split by &):
-      ├── regex 語法檢查          ← regexp: prefix + invalid → 錯誤提示
+      ├── regex 安全性檢查         ← unsafe regex → 錯誤提示
       ├── subscriptionExists()   ← 已存在 → 重複提示
       ├── addSubscription()      → PostgreSQL
       ├── addSubscriptionToRedis() → Redis
@@ -108,7 +108,7 @@ Output (按看板分組):
 
 📌 Gossiping
    • 問卦
-   • regexp:爆卦.*
+   • 爆卦.*
 📌 Stock
    • 台積電
 ```
@@ -146,7 +146,7 @@ if (text === "幫助") return { command: "help", args: "" };
 if (text === "清單") return { command: "list", args: "" };
 if (text.startsWith("新增")) return { command: "add", args: text.slice(2).trim() };
 if (text.startsWith("刪除")) return { command: "delete", args: text.slice(2).trim() };
-// 不認識的文字 → null → 無回覆
+// 不認識的文字 → null → 回覆「❌ 無法辨識的指令」
 ```
 
 ## User Resolution
