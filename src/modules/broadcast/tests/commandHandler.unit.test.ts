@@ -22,7 +22,7 @@ const mockGetSubscriptions = jest.fn();
 const mockSubscriptionExists = jest.fn();
 const mockAddSubscription = jest.fn();
 const mockDeleteSubscription = jest.fn();
-const mockBoardExists = jest.fn();
+const mockResolveBoard = jest.fn();
 const mockAddToRedis = jest.fn();
 const mockRemoveFromRedis = jest.fn();
 
@@ -52,7 +52,7 @@ jest.mock("../../user/repositories/subscriptionRepository", () => ({
 }));
 
 jest.mock("../../user/services/boardValidator", () => ({
-  boardExists: (...args: any[]) => mockBoardExists(...args),
+  resolveBoard: (...args: any[]) => mockResolveBoard(...args),
 }));
 
 jest.mock("../../user/services/syncService", () => ({
@@ -201,16 +201,16 @@ describe("executeAdd", () => {
 
   it("should return error when board does not exist", async () => {
     mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
-    mockBoardExists.mockResolvedValue(false);
+    mockResolveBoard.mockResolvedValue(null);
 
     const result = await executeAdd(buildCtx(), "FakeBoard keyword");
 
     expect(result.reply).toContain("查無此看板");
   });
 
-  it("should normalize board name to capitalize first letter", async () => {
+  it("should resolve canonical board name from PTT", async () => {
     mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
-    mockBoardExists.mockResolvedValue(true);
+    mockResolveBoard.mockResolvedValue("Stock");
     mockSubscriptionExists.mockResolvedValue(false);
     mockAddSubscription.mockResolvedValue({});
     mockAddToRedis.mockResolvedValue(undefined);
@@ -218,13 +218,13 @@ describe("executeAdd", () => {
     const result = await executeAdd(buildCtx(), "stock 台積電");
 
     expect(result.reply).toContain("成功新增");
-    expect(mockBoardExists).toHaveBeenCalledWith("Stock");
+    expect(mockResolveBoard).toHaveBeenCalledWith("stock");
     expect(mockAddSubscription).toHaveBeenCalledWith("user-1", "Stock", "台積電");
   });
 
   it("should add subscription successfully", async () => {
     mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
-    mockBoardExists.mockResolvedValue(true);
+    mockResolveBoard.mockResolvedValue("Gossiping");
     mockSubscriptionExists.mockResolvedValue(false);
     mockAddSubscription.mockResolvedValue({});
     mockAddToRedis.mockResolvedValue(undefined);
@@ -237,7 +237,7 @@ describe("executeAdd", () => {
 
   it("should handle duplicate subscription", async () => {
     mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
-    mockBoardExists.mockResolvedValue(true);
+    mockResolveBoard.mockResolvedValue("Gossiping");
     mockSubscriptionExists.mockResolvedValue(true);
 
     const result = await executeAdd(buildCtx(), "Gossiping 問卦");
@@ -247,7 +247,7 @@ describe("executeAdd", () => {
 
   it("should save regex pattern directly without prefix", async () => {
     mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
-    mockBoardExists.mockResolvedValue(true);
+    mockResolveBoard.mockResolvedValue("Gossiping");
     mockSubscriptionExists.mockResolvedValue(false);
     mockAddSubscription.mockResolvedValue({});
     mockAddToRedis.mockResolvedValue(undefined);
@@ -260,7 +260,7 @@ describe("executeAdd", () => {
 
   it("should save invalid regex (like C++) without error", async () => {
     mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
-    mockBoardExists.mockResolvedValue(true);
+    mockResolveBoard.mockResolvedValue("Gossiping");
     mockSubscriptionExists.mockResolvedValue(false);
     mockAddSubscription.mockResolvedValue({});
     mockAddToRedis.mockResolvedValue(undefined);
@@ -273,7 +273,7 @@ describe("executeAdd", () => {
 
   it("should reject unsafe regex pattern", async () => {
     mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
-    mockBoardExists.mockResolvedValue(true);
+    mockResolveBoard.mockResolvedValue("Gossiping");
     mockIsPatternSafe.mockReturnValueOnce(false);
 
     const result = await executeAdd(buildCtx(), "Gossiping (a+)+$");
@@ -288,6 +288,7 @@ describe("executeDelete", () => {
 
   it("should delete subscription successfully", async () => {
     mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
+    mockResolveBoard.mockResolvedValue("Gossiping");
     mockSubscriptionExists.mockResolvedValue(true);
     mockDeleteSubscription.mockResolvedValue({});
     mockRemoveFromRedis.mockResolvedValue(undefined);
@@ -299,6 +300,7 @@ describe("executeDelete", () => {
 
   it("should return error when subscription does not exist", async () => {
     mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
+    mockResolveBoard.mockResolvedValue("Gossiping");
     mockSubscriptionExists.mockResolvedValue(false);
 
     const result = await executeDelete(buildCtx(), "Gossiping 問卦");

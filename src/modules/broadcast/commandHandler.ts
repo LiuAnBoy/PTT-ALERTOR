@@ -8,21 +8,11 @@ import {
   subscriptionExists,
 } from "../user/repositories/subscriptionRepository";
 import { createUser } from "../user/repositories/userRepository";
-import { boardExists } from "../user/services/boardValidator";
+import { resolveBoard } from "../user/services/boardValidator";
 import { addSubscriptionToRedis, removeSubscriptionFromRedis } from "../user/services/syncService";
 import type { CommandContext, CommandResult } from "./types";
 
 const logger = createLogger("COMMAND");
-
-/**
- * Normalize a board name to capitalize the first letter (e.g. "stock" → "Stock").
- * @param name - The raw board name input.
- * @returns The normalized board name.
- */
-function normalizeBoardName(name: string): string {
-  const lower = name.toLowerCase();
-  return lower.charAt(0).toUpperCase() + lower.slice(1);
-}
 
 /**
  * Parse a text message into a command and its arguments.
@@ -99,7 +89,7 @@ export function executeHelp(): CommandResult {
     "  新增 NBA ^(LBJ|Curry)",
     "",
     "⚠️ 注意事項",
-    "  • 看板名稱區分大小寫（如 Gossiping, Stock）",
+    "  • 看板名稱不分大小寫（自動修正）",
     "  • 關鍵字比對不分大小寫",
     "  • 無效的正則會自動視為純文字匹配",
   ].join("\n");
@@ -151,13 +141,12 @@ export async function executeAdd(ctx: CommandContext, args: string): Promise<Com
     return { reply: "❌ 格式錯誤。用法：新增 [看板] [關鍵字]\n範例：新增 Gossiping 問卦" };
   }
 
-  const boardName = normalizeBoardName(parts[0]);
   const keywordStr = parts.slice(1).join(" ");
 
-  // Validate board exists
-  const valid = await boardExists(boardName);
-  if (!valid) {
-    return { reply: `❌ 查無此看板「${boardName}」。請確認看板名稱是否正確。` };
+  // Validate board exists and resolve canonical name
+  const boardName = await resolveBoard(parts[0]);
+  if (!boardName) {
+    return { reply: `❌ 查無此看板「${parts[0]}」。請確認看板名稱是否正確。` };
   }
 
   // Split keywords by &
@@ -206,8 +195,13 @@ export async function executeDelete(ctx: CommandContext, args: string): Promise<
     return { reply: "❌ 格式錯誤。用法：刪除 [看板] [關鍵字]\n範例：刪除 Gossiping 問卦" };
   }
 
-  const boardName = normalizeBoardName(parts[0]);
   const keyword = parts.slice(1).join(" ");
+
+  // Resolve canonical board name
+  const boardName = await resolveBoard(parts[0]);
+  if (!boardName) {
+    return { reply: `❌ 查無此看板「${parts[0]}」。請確認看板名稱是否正確。` };
+  }
 
   const exists = await subscriptionExists(user.id, boardName, keyword);
   if (!exists) {
