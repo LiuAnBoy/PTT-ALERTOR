@@ -87,11 +87,13 @@ export async function stopBot(): Promise<void> {
  */
 function toCommandContext(ctx: Context): CommandContext | null {
   if (!ctx.from) return null;
+  const { id, first_name, last_name, username, language_code, is_premium, is_bot } = ctx.from;
   return {
     platform: "TELEGRAM",
-    platformUserId: ctx.from.id.toString(),
-    platformChatId: (ctx.chat?.id ?? ctx.from.id).toString(),
-    username: ctx.from.username ?? undefined,
+    platformUserId: id.toString(),
+    platformChatId: (ctx.chat?.id ?? id).toString(),
+    displayName: [first_name, last_name].filter(Boolean).join(" ") || undefined,
+    rawData: { id, first_name, last_name, username, language_code, is_premium, is_bot },
     text: ctx.message?.text?.trim() ?? "",
   };
 }

@@ -15,7 +15,7 @@ jest.mock("../../user/services/errorLogger", () => ({
   logError: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock("./pttClient", () => ({
+jest.mock("../services/pttClient", () => ({
   PTT_BASE_URL: "https://www.ptt.cc",
   pttClient: { get: jest.fn() },
 }));
@@ -23,8 +23,8 @@ jest.mock("./pttClient", () => ({
 // ── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { logError } from "../../user/services/errorLogger";
-import { extractCode, extractTimestamp, fetchHtml, parsePushCount } from "./htmlFetcher";
-import { pttClient } from "./pttClient";
+import { extractCode, extractTimestamp, fetchHtml, parsePushCount } from "../services/htmlFetcher";
+import { pttClient } from "../services/pttClient";
 
 const mockGet = pttClient.get as jest.Mock;
 const mockLogError = logError as jest.Mock;

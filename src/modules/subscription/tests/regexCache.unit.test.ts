@@ -1,4 +1,4 @@
-import { getRegex } from "./regexCache";
+import { getRegex } from "../services/regexCache";
 
 describe("getRegex", () => {
   // Case 1: valid pattern returns a RegExp instance

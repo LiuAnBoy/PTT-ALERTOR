@@ -11,8 +11,10 @@ export interface CommandContext {
   platformUserId: string;
   /** Chat/Channel ID for sending replies */
   platformChatId: string;
-  /** Optional username on the platform */
-  username?: string;
+  /** Display name on the platform (e.g. Telegram first_name) */
+  displayName?: string;
+  /** Raw platform user data for storage */
+  rawData?: Record<string, unknown>;
   /** The raw text message from the user */
   text: string;
 }

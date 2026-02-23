@@ -11,6 +11,9 @@ datasource db {
 model User {
   id            String         @id @default(uuid())
   enable        Boolean        @default(true)
+  username      String?
+  email         String?
+  phone         String?
   subscriptions Subscription[]
   channels      Channel[]
   createdAt     DateTime       @default(now())
@@ -30,7 +33,7 @@ model Channel {
   platform       Platform
   platformUserId String
   platformChatId String
-  username       String?
+  rawData        Json?
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt      DateTime @default(now())

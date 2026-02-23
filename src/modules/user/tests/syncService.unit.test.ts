@@ -27,7 +27,7 @@ import {
   addSubscriptionToRedis,
   removeSubscriptionFromRedis,
   syncSubscriptions,
-} from "./syncService";
+} from "../services/syncService";
 
 const pipe = mockRedis._mockPipeline;
 

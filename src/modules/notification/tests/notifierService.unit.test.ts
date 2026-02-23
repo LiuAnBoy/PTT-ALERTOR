@@ -6,7 +6,7 @@
 
 import type { NotificationPayload } from "../../broadcast/types";
 import { logError } from "../../user/services/errorLogger";
-import { sendNotification } from "./notifierService";
+import { sendNotification } from "../services/notifierService";
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 

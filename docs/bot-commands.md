@@ -46,8 +46,8 @@ Flow:
   ├── findChannelByPlatformUserId("TELEGRAM", from.id)
   │
   ├── null (new user):
-  │   ├── createUser()       → PostgreSQL
-  │   ├── createChannel()    → PostgreSQL
+  │   ├── createUser(displayName)    → PostgreSQL (User.username = displayName)
+  │   ├── createChannel(rawData)     → PostgreSQL (Channel.rawData = ctx.from)
   │   └── reply("🎉 註冊成功...")
   │
   └── found (existing):

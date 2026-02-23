@@ -46,15 +46,15 @@ export async function executeStart(ctx: CommandContext): Promise<CommandResult> 
     const channel = await findChannelByPlatformUserId(ctx.platform, ctx.platformUserId);
 
     if (!channel) {
-      const user = await createUser();
+      const user = await createUser(ctx.displayName);
       await createChannel(
         user.id,
         ctx.platform,
         ctx.platformUserId,
         ctx.platformChatId,
-        ctx.username,
+        ctx.rawData,
       );
-      logger.info(`New user registered: ${ctx.username ?? ctx.platformUserId}`);
+      logger.info(`New user registered: ${ctx.displayName ?? ctx.platformUserId}`);
       return { reply: `🎉 註冊成功！歡迎使用 PTT Alertor\n${quickStart}` };
     }
 

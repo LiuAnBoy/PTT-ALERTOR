@@ -22,12 +22,12 @@ jest.mock("bullmq", () => ({
   Queue: jest.fn().mockImplementation(() => ({ add: mockAdd, addBulk: mockAddBulk })),
 }));
 
-jest.mock("./htmlFetcher", () => ({ fetchHtml: jest.fn() }));
-jest.mock("./articleCache", () => ({
+jest.mock("../services/htmlFetcher", () => ({ fetchHtml: jest.fn() }));
+jest.mock("../services/articleCache", () => ({
   filterNewArticles: jest.fn(),
   cacheArticles: jest.fn().mockResolvedValue(undefined),
 }));
-jest.mock("./detailFetcher", () => ({
+jest.mock("../services/detailFetcher", () => ({
   ARTICLE_DELETED: Symbol("ARTICLE_DELETED"),
   fetchDetail: jest.fn(),
 }));
@@ -46,10 +46,10 @@ import {
   insertNewArticles,
   updateArticleDetail,
 } from "../repositories/articleRepository";
-import { cacheArticles, filterNewArticles } from "./articleCache";
-import { fetchNewArticles, updateActiveArticles } from "./crawlerService";
-import { ARTICLE_DELETED, fetchDetail } from "./detailFetcher";
-import { fetchHtml } from "./htmlFetcher";
+import { cacheArticles, filterNewArticles } from "../services/articleCache";
+import { fetchNewArticles, updateActiveArticles } from "../services/crawlerService";
+import { ARTICLE_DELETED, fetchDetail } from "../services/detailFetcher";
+import { fetchHtml } from "../services/htmlFetcher";
 
 const mockFetchHtml = fetchHtml as jest.Mock;
 const mockFilterNewArticles = filterNewArticles as jest.Mock;

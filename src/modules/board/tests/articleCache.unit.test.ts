@@ -10,7 +10,12 @@ jest.mock("../../user/services/errorLogger", () => ({
   logError: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { cacheArticles, cleanCache, filterNewArticles, isCacheEmpty } from "./articleCache";
+import {
+  cacheArticles,
+  cleanCache,
+  filterNewArticles,
+  isCacheEmpty,
+} from "../services/articleCache";
 
 /**
  * Create a test RawArticle with sensible defaults.

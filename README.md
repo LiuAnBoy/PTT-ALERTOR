@@ -141,7 +141,7 @@ Scheduler (1 min)
 | `pnpm server` | Dev server (nodemon + tsx, hot reload) |
 | `pnpm build` | TypeScript compile |
 | `pnpm start` | Production start |
-| `pnpm test:unit` | Unit tests (~101 cases) |
+| `pnpm test:unit` | Unit tests (~109 cases) |
 | `pnpm test:integration` | Integration tests (requires DB/Redis) |
 | `pnpm test:cov` | Coverage report |
 | `pnpm lint` | ESLint |
@@ -285,18 +285,24 @@ Bot webhook → Workers → Scheduler → HTTP server → Redis → PostgreSQL
 
 ```
 src/
+├── __mocks__/          # Shared mock factories (Redis, Prisma, Bot, Context)
 ├── core/               # Config, logger, prisma, redis, queue, maintenance
 ├── modules/
 │   ├── board/          # Crawling, parsing, caching, article repository
+│   │   └── tests/     # Unit + integration tests
 │   ├── broadcast/      # Multi-platform command & notification layer
 │   │   ├── commandHandler.ts   # Shared command logic (platform-agnostic)
 │   │   ├── registry.ts         # Platform adapter registry
 │   │   ├── types.ts            # CommandContext, PlatformAdapter, etc.
-│   │   └── channels/
-│   │       └── telegram.ts     # Telegram: receive + send + formatting
+│   │   ├── channels/
+│   │   │   └── telegram.ts     # Telegram: receive + send + formatting
+│   │   └── tests/     # Unit tests
 │   ├── subscription/   # Keyword matching, regex cache
+│   │   └── tests/     # Unit tests
 │   ├── notification/   # Push notification worker & service
+│   │   └── tests/     # Unit tests
 │   └── user/           # User/channel/subscription repos, sync, error logging
+│       └── tests/     # Unit tests
 ├── middlewares/         # Express error handler
 ├── types/              # Shared type definitions
 ├── app.ts              # Express app

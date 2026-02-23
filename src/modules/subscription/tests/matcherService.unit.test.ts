@@ -18,7 +18,7 @@ jest.mock("../../user/services/errorLogger", () => ({
 }));
 
 import { logError } from "../../user/services/errorLogger";
-import { matchArticle, matchKeyword } from "./matcherService";
+import { matchArticle, matchKeyword } from "../services/matcherService";
 
 beforeEach(() => {
   jest.clearAllMocks();

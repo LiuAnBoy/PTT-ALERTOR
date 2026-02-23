@@ -4,8 +4,8 @@
  * Covers escapeHtml, formatMessage, and adapter send methods.
  */
 
+import { escapeHtml, formatMessage, telegramAdapter } from "../channels/telegram";
 import type { NotificationPayload } from "../types";
-import { escapeHtml, formatMessage, telegramAdapter } from "./telegram";
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 

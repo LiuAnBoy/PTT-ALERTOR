@@ -15,15 +15,15 @@ jest.mock("../../user/services/errorLogger", () => ({
   logError: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock("./pttClient", () => ({
+jest.mock("../services/pttClient", () => ({
   pttClient: { get: jest.fn() },
 }));
 
 // ── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { logError } from "../../user/services/errorLogger";
-import { ARTICLE_DELETED, extractIp, fetchDetail } from "./detailFetcher";
-import { pttClient } from "./pttClient";
+import { ARTICLE_DELETED, extractIp, fetchDetail } from "../services/detailFetcher";
+import { pttClient } from "../services/pttClient";
 
 const mockGet = pttClient.get as jest.Mock;
 const mockLogError = logError as jest.Mock;

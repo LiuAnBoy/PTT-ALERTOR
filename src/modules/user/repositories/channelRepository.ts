@@ -21,7 +21,7 @@ export async function findChannelByPlatformUserId(platform: Platform, platformUs
  * @param platform - The platform type.
  * @param platformUserId - The user ID on that platform.
  * @param platformChatId - The chat ID for sending notifications.
- * @param username - Optional username on the platform.
+ * @param rawData - Optional raw platform user data (JSON).
  * @returns The created channel record.
  */
 export async function createChannel(
@@ -29,9 +29,9 @@ export async function createChannel(
   platform: Platform,
   platformUserId: string,
   platformChatId: string,
-  username?: string,
+  rawData?: Record<string, unknown>,
 ) {
   return getPrisma().channel.create({
-    data: { userId, platform, platformUserId, platformChatId, username },
+    data: { userId, platform, platformUserId, platformChatId, rawData },
   });
 }

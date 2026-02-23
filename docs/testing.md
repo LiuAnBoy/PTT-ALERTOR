@@ -8,7 +8,7 @@
 
 | Type | Location | 命名 | 依賴 | 數量 |
 |------|----------|------|------|------|
-| Unit | co-located with source | `*.unit.test.ts` | 全部 mock | ~91 |
+| Unit | `modules/*/tests/` | `*.unit.test.ts` | 全部 mock | ~109 |
 | Integration | `modules/*/tests/` | `*.test.ts` | 真實 DB/Redis/PTT | 4 |
 
 ## Commands
@@ -52,7 +52,7 @@ jest.mock("../../../core/redis", () => ({
 }));
 
 // Import AFTER mocks are declared
-import { myFunction } from "./myModule";
+import { myFunction } from "../services/myModule";
 ```
 
 ### 測試策略
@@ -66,17 +66,18 @@ import { myFunction } from "./myModule";
 
 ### Unit Test Files
 
-| File | Module | Cases |
-|------|--------|-------|
-| `regexCache.unit.test.ts` | regexCache | 5 |
-| `htmlFetcher.unit.test.ts` | htmlFetcher | 16 |
-| `detailFetcher.unit.test.ts` | detailFetcher | 10 |
-| `notifierService.unit.test.ts` | notifierService | 9 |
-| `matcherService.unit.test.ts` | matcherService | 10 |
-| `articleCache.unit.test.ts` | articleCache | 9 |
-| `syncService.unit.test.ts` | syncService | 11 |
-| `crawlerService.unit.test.ts` | crawlerService | 8 |
-| `telegram.unit.test.ts` | telegram adapter | 13 |
+| File | Location | Cases |
+|------|----------|-------|
+| `htmlFetcher.unit.test.ts` | `board/tests/` | 16 |
+| `detailFetcher.unit.test.ts` | `board/tests/` | 10 |
+| `articleCache.unit.test.ts` | `board/tests/` | 9 |
+| `crawlerService.unit.test.ts` | `board/tests/` | 8 |
+| `regexCache.unit.test.ts` | `subscription/tests/` | 5 |
+| `matcherService.unit.test.ts` | `subscription/tests/` | 10 |
+| `notifierService.unit.test.ts` | `notification/tests/` | 9 |
+| `syncService.unit.test.ts` | `user/tests/` | 11 |
+| `commandHandler.unit.test.ts` | `broadcast/tests/` | 18 |
+| `telegram.unit.test.ts` | `broadcast/tests/` | 13 |
 
 ## Integration Tests
 

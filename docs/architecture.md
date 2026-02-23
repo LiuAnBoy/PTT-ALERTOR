@@ -80,37 +80,42 @@ src/
 │   │   │   ├── crawlerWorker.ts    # Processes crawler jobs (concurrency: 5)
 │   │   │   ├── updateWorker.ts     # Refreshes active article details
 │   │   │   └── maintenanceWorker.ts
+│   │   ├── tests/                  # Unit + integration tests
 │   │   └── types/article.ts
 │   │
 │   ├── subscription/         # Keyword matching
 │   │   ├── services/
 │   │   │   ├── matcherService.ts   # Title vs keyword matching (plain + regex)
 │   │   │   └── regexCache.ts       # In-memory regex compilation cache
-│   │   └── workers/
-│   │       └── matcherWorker.ts    # Processes match jobs (concurrency: 5)
+│   │   ├── workers/
+│   │   │   └── matcherWorker.ts    # Processes match jobs (concurrency: 5)
+│   │   └── tests/                  # Unit tests
 │   │
 │   ├── broadcast/            # Multi-platform command & notification
 │   │   ├── types.ts               # CommandContext, PlatformAdapter, CommandResult
 │   │   ├── registry.ts            # Platform adapter registry
 │   │   ├── commandHandler.ts      # Shared command logic (platform-agnostic)
-│   │   └── channels/
-│   │       └── telegram.ts        # Telegram: bot setup + receive + send + format
+│   │   ├── channels/
+│   │   │   └── telegram.ts        # Telegram: bot setup + receive + send + format
+│   │   └── tests/                  # Unit tests
 │   │
 │   ├── notification/         # Push notification dispatch
 │   │   ├── services/
 │   │   │   └── notifierService.ts  # Multi-platform notification via adapter registry
-│   │   └── workers/
-│   │       └── notifierWorker.ts   # Rate-limited sender (30 msg/s)
+│   │   ├── workers/
+│   │   │   └── notifierWorker.ts   # Rate-limited sender (30 msg/s)
+│   │   └── tests/                  # Unit tests
 │   │
 │   └── user/                 # User management
 │       ├── repositories/
 │       │   ├── userRepository.ts
 │       │   ├── channelRepository.ts
 │       │   └── subscriptionRepository.ts
-│       └── services/
-│           ├── syncService.ts      # DB → Redis subscription sync
-│           ├── boardValidator.ts   # PTT board existence check
-│           └── errorLogger.ts      # DB error logging + admin alerts
+│       ├── services/
+│       │   ├── syncService.ts      # DB → Redis subscription sync
+│       │   ├── boardValidator.ts   # PTT board existence check
+│       │   └── errorLogger.ts      # DB error logging + admin alerts
+│       └── tests/                  # Unit tests
 │
 ├── middlewares/
 │   └── errorHandler.ts       # Express error middleware
@@ -118,6 +123,37 @@ src/
 ├── app.ts                    # Express app setup
 └── server.ts                 # Bootstrap entry point
 ```
+
+## Data Model
+
+### User
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID | Primary key |
+| `enable` | Boolean | Enable/disable notifications |
+| `username` | String? | Display name (from first platform registration) |
+| `email` | String? | Email address |
+| `phone` | String? | Phone number |
+| `createdAt` | DateTime | Registration time |
+| `updatedAt` | DateTime | Last update time |
+
+### Channel
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID | Primary key |
+| `platform` | Platform | TELEGRAM, DISCORD, LINE, etc. |
+| `platformUserId` | String | User ID on the platform |
+| `platformChatId` | String | Chat ID for sending messages |
+| `rawData` | Json? | Raw platform user data (e.g. full `ctx.from` object) |
+| `userId` | String | FK → User |
+| `createdAt` | DateTime | Creation time |
+
+Unique constraint: `(platform, platformUserId)`
+
+### Multi-Platform Registration
+
+Each `/start` creates an independent User + Channel pair.
+Future: binding command to link channels across platforms to a single User.
 
 ## Design Decisions
 
