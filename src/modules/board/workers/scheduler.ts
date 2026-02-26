@@ -1,8 +1,12 @@
 import { Queue } from "bullmq";
 
+import { alertAggregator } from "../../../core/alertAggregator";
+import { crawlerCircuit } from "../../../core/circuitBreaker";
 import { createLogger } from "../../../core/logger";
 import { bullmqConnection } from "../../../core/queue";
 import { redis } from "../../../core/redis";
+import { roundTracker } from "../../../core/roundTracker";
+import { sendRecoveryAlert, sendSummaryAlert } from "../../user/services/errorLogger";
 
 const logger = createLogger("SCHEDULER");
 
@@ -11,15 +15,15 @@ const defaultJobOptions = {
   backoff: { type: "exponential" as const, delay: 5_000 },
 };
 
-const crawlerQueue = new Queue("crawler-queue", {
+export const crawlerQueue = new Queue("crawler-queue", {
   connection: bullmqConnection,
   defaultJobOptions,
 });
-const updateQueue = new Queue("update-queue", {
+export const updateQueue = new Queue("update-queue", {
   connection: bullmqConnection,
   defaultJobOptions,
 });
-const maintenanceQueue = new Queue("maintenance-queue", {
+export const maintenanceQueue = new Queue("maintenance-queue", {
   connection: bullmqConnection,
   defaultJobOptions,
 });
@@ -28,7 +32,7 @@ const maintenanceQueue = new Queue("maintenance-queue", {
  * Dispatch queue for the meta-scheduler.
  * A repeatable job reads subscribed boards from Redis and dispatches crawler jobs.
  */
-const dispatchQueue = new Queue("dispatch-queue", {
+export const dispatchQueue = new Queue("dispatch-queue", {
   connection: bullmqConnection,
   defaultJobOptions,
 });
@@ -64,6 +68,7 @@ export async function startScheduler(): Promise<void> {
 /**
  * Read subscribed boards from Redis and dispatch a crawler job for each.
  * Called by the dispatch worker every minute.
+ * Checks circuit breaker state before dispatching and handles recovery alerts.
  *
  * @returns Array of board names dispatched.
  */
@@ -74,6 +79,24 @@ export async function dispatchCrawlerJobs(): Promise<string[]> {
     logger.debug("No subscribed boards to crawl");
     return [];
   }
+
+  // Circuit breaker gate
+  if (crawlerCircuit.isOpen()) {
+    if (crawlerCircuit.shouldAttempt()) {
+      logger.info("Circuit HALF_OPEN: dispatching probe round");
+    } else {
+      logger.warn(`Circuit OPEN: skipping dispatch for ${boards.length} boards`);
+      await sendSummaryAlert();
+      return [];
+    }
+  }
+
+  // Check if we just recovered (circuit CLOSED but alertAggregator still ALERTING)
+  if (crawlerCircuit.getState() === "CLOSED" && alertAggregator.getState() === "ALERTING") {
+    await sendRecoveryAlert();
+  }
+
+  roundTracker.startRound(boards.length);
 
   for (const board of boards) {
     await crawlerQueue.add("crawl", { boardName: board });

@@ -83,10 +83,27 @@ ZREMRANGEBYSCORE active:articles -inf {cutoff_timestamp}
 | Level | Behavior |
 |-------|----------|
 | **FATAL** | 立即推送到 admin Telegram |
-| **ERROR** | 5 分鐘 cooldown（相同 module+message 組合不重複推送） |
+| **ERROR** | 透過 AlertAggregator 聚合（見下方） |
 | **WARN** | 僅寫入 DB，不推送 |
 
-Cooldown 透過 in-memory `Map<string, number>` 實作（`errorLogger.ts`）。
+### Alert Aggregation（告警聚合）
+
+取代舊版 per-key cooldown，避免大量錯誤時通知轟炸。
+
+**狀態機**: `NORMAL → ALERTING → NORMAL`
+
+| 事件 | 行為 |
+|------|------|
+| 第一筆 ERROR | 立即推送首則告警，進入 ALERTING 狀態 |
+| 後續 ERROR（ALERTING 中） | 僅計數（按 module 分組），不推播 |
+| Circuit Breaker OPEN 期間 | 每輪 dispatch 發送聚合摘要 |
+| 恢復正常 | 推送恢復通知（含故障持續時間和統計），重置計數器 |
+
+實作於 `src/core/alertAggregator.ts`（in-memory singleton），由 `errorLogger.ts` 的 `logError()` 觸發。
+
+### Worker 失敗告警
+
+所有 BullMQ worker（crawlerWorker、dispatchWorker、updateWorker）在 job 用盡所有重試時，會呼叫 `logError("ERROR", ...)` 將失敗記錄寫入 DB 並觸發告警系統。
 
 ### Admin Commands
 
@@ -109,4 +126,35 @@ defaultJobOptions: {
 | 1st retry | 5s |
 | 2nd retry | 10s |
 | 3rd retry | 20s |
-| 之後 | Job 標記為 failed |
+| 之後 | Job 標記為 failed，觸發 logError 告警 |
+
+## Circuit Breaker（熔斷機制）
+
+當 PTT 無法連線時，避免持續發送無效請求。
+
+**狀態機**: `CLOSED → OPEN → HALF_OPEN → CLOSED`
+
+| 狀態轉換 | 觸發條件 |
+|----------|----------|
+| CLOSED → OPEN | 單輪 dispatch 中所有看板 crawl 全部失敗 |
+| OPEN → HALF_OPEN | 等待 cooldown（2 分鐘）後允許下一輪嘗試 |
+| HALF_OPEN → CLOSED | 嘗試成功，恢復正常運作 |
+| HALF_OPEN → OPEN | 嘗試仍失敗，繼續熔斷 |
+
+**OPEN 期間行為**:
+- crawlerWorker 檢查 circuit 狀態，若 OPEN 則跳過執行
+- dispatchCrawlerJobs 發送聚合摘要告警
+- 不會完全停止排程，只是 worker 端 skip
+
+實作於 `src/core/circuitBreaker.ts`（singleton `crawlerCircuit`）和 `src/core/roundTracker.ts`（追蹤每輪成功/失敗數）。
+
+## BullMQ Failed Job Cleanup
+
+`runCleanup`（每小時執行）會清理所有 queue 中超過 24 小時的 failed jobs：
+
+```
+crawlerQueue, updateQueue, maintenanceQueue, dispatchQueue
+→ queue.clean(24h, 100, "failed")
+```
+
+避免 failed jobs 在 Redis 中無限堆積。
