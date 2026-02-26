@@ -2,6 +2,7 @@ import { Worker } from "bullmq";
 
 import { createLogger } from "../../../core/logger";
 import { bullmqConnection } from "../../../core/queue";
+import { logError } from "../../user/services/errorLogger";
 import { fetchNewArticles } from "../services/crawlerService";
 
 const logger = createLogger("CRAWLER");
@@ -26,4 +27,13 @@ crawlerWorker.on("failed", (job, err) => {
   const attempt = job?.attemptsMade ?? 0;
   const maxAttempts = job?.opts?.attempts ?? 1;
   logger.error(`Job ${job?.id} failed (${attempt}/${maxAttempts}): ${err.message}`);
+
+  if (attempt >= maxAttempts) {
+    const boardName = (job?.data as { boardName?: string })?.boardName ?? "unknown";
+    logError("ERROR", "CRAWLER", `Crawl job exhausted: ${boardName}`, {
+      jobId: job?.id,
+      attempts: attempt,
+      error: err.message,
+    }).catch(() => {});
+  }
 });
