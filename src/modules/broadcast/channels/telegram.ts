@@ -15,7 +15,15 @@ import {
 } from "../commandHandler";
 import { registerAdapter } from "../registry";
 import type { CommandContext, NotificationPayload, PlatformAdapter } from "../types";
-import type { CrawlerLog } from ".prisma/client";
+
+/** Subset of CrawlerLog fields used in the error report formatter. */
+interface ErrorLogEntry {
+  createdAt: Date;
+  level: string;
+  module: string;
+  message: string;
+  notified: boolean;
+}
 
 const logger = createLogger("BOT");
 
@@ -174,7 +182,7 @@ async function handleErrors(ctx: Context) {
     return;
   }
 
-  const lines = logs.map((log: CrawlerLog) => {
+  const lines = logs.map((log: ErrorLogEntry) => {
     const time = log.createdAt.toLocaleString("zh-TW", { timeZone: "Asia/Taipei" });
     const icon = log.level === "FATAL" ? "🚨" : log.level === "ERROR" ? "⚠️" : "⚡";
     const notified = log.notified ? "✓" : "✗";
