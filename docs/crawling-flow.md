@@ -153,7 +153,35 @@ updateQueue → updateWorker → updateActiveArticles()
 
 ## 錯誤處理
 
-- HTTP 錯誤 → 記錄至 `crawler_logs` 並向管理員發送 Telegram 告警
+- HTTP 錯誤 → 記錄至 `crawler_logs` 並透過 AlertAggregator 聚合告警
 - 404 → 使用 `ARTICLE_DELETED` 標記，從 Redis `active:articles` 移除
 - 其他錯誤 → 回傳 null，跳過該文章
 - BullMQ 任務失敗 → 使用指數退避進行重試 (最多 3 次)
+- 任務重試用盡 → worker `on("failed")` 呼叫 `logError` 寫入 DB 並觸發告警
+
+## Circuit Breaker（熔斷機制）
+
+```
+dispatchCrawlerJobs()
+    │
+    ├── Circuit OPEN + cooldown 未到？ → 跳過 dispatch，發送摘要告警
+    ├── Circuit OPEN + cooldown 已到？ → HALF_OPEN，派發 probe round
+    └── Circuit CLOSED？ → 正常派發
+            │
+            ▼
+    crawlerWorker processor
+            │
+            ├── roundTracker.isCircuitOpen()？ → skip，記錄 failure
+            └── 正常爬取 → try/catch 記錄 success/failure
+                    │
+                    ▼
+            roundTracker.checkRoundComplete()
+                    │
+                    ├── 全滅 → circuitBreaker OPEN + 首則告警
+                    └── 有成功 → 保持/恢復 CLOSED + 恢復通知
+```
+
+相關模組：
+- `src/core/circuitBreaker.ts` — 熔斷狀態機
+- `src/core/roundTracker.ts` — 每輪成功/失敗追蹤
+- `src/core/alertAggregator.ts` — 告警聚合
