@@ -69,7 +69,7 @@ async function cleanupRedisCache(): Promise<number> {
  */
 async function cleanupFailedJobs(): Promise<number> {
   const { crawlerQueue, updateQueue, maintenanceQueue, dispatchQueue } =
-    await import("../modules/board/workers/scheduler");
+    await import("../modules/board/workers/scheduler.js");
   const queues = [crawlerQueue, updateQueue, maintenanceQueue, dispatchQueue];
   let total = 0;
 
