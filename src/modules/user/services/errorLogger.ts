@@ -1,21 +1,18 @@
-import type { LogLevel } from "@prisma/client";
-
+import { alertAggregator } from "../../../core/alertAggregator";
 import { config } from "../../../core/config";
 import { createLogger } from "../../../core/logger";
 import { getPrisma } from "../../../core/prisma";
 import { getAdapter } from "../../broadcast/registry";
 
+/** Mirrors Prisma's LogLevel enum without requiring a generated client at compile time. */
+type LogLevel = "WARN" | "ERROR" | "FATAL";
+
 const logger = createLogger("BOT");
-
-const ERROR_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
-
-/** Track last alert time by error key to implement cooldown. */
-const lastAlertMap = new Map<string, number>();
 
 /**
  * Log an error to crawler_logs and optionally push alert to admin.
  * FATAL: always push immediately.
- * ERROR: push with 5-minute cooldown per module+message combo.
+ * ERROR: records into AlertAggregator; only the first error triggers an immediate alert.
  *
  * @param level - Log severity level.
  * @param module - Module tag where the error occurred.
@@ -39,15 +36,31 @@ export async function logError(
   if (level === "FATAL") {
     await sendAlert(`🚨 [FATAL] ${module} | ${message}`);
   } else if (level === "ERROR") {
-    const key = `${module}:${message}`;
-    const now = Date.now();
-    const last = lastAlertMap.get(key) ?? 0;
+    const wasNormal = alertAggregator.getState() === "NORMAL";
+    alertAggregator.recordError(module, message);
 
-    if (now - last >= ERROR_COOLDOWN_MS) {
-      lastAlertMap.set(key, now);
-      await sendAlert(`⚠️ [ERROR] ${module} | ${message}`);
+    if (wasNormal) {
+      await sendAlert(alertAggregator.getFirstAlert());
     }
   }
+}
+
+/**
+ * Send an aggregated summary alert if currently in ALERTING state.
+ * Intended to be called periodically (e.g. end of each crawl cycle).
+ */
+export async function sendSummaryAlert(): Promise<void> {
+  if (alertAggregator.getState() !== "ALERTING") return;
+  await sendAlert(alertAggregator.getSummary());
+}
+
+/**
+ * Send a recovery notification and reset the aggregator back to NORMAL.
+ * Should be called when a crawl cycle completes without errors.
+ */
+export async function sendRecoveryAlert(): Promise<void> {
+  await sendAlert(alertAggregator.getRecoveryMessage());
+  alertAggregator.recover();
 }
 
 /**
