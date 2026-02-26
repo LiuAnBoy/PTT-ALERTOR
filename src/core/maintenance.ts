@@ -68,9 +68,8 @@ async function cleanupRedisCache(): Promise<number> {
  * @returns Total number of failed jobs removed.
  */
 async function cleanupFailedJobs(): Promise<number> {
-  const { crawlerQueue, updateQueue, maintenanceQueue, dispatchQueue } = await import(
-    "../modules/board/workers/scheduler"
-  );
+  const { crawlerQueue, updateQueue, maintenanceQueue, dispatchQueue } =
+    await import("../modules/board/workers/scheduler");
   const queues = [crawlerQueue, updateQueue, maintenanceQueue, dispatchQueue];
   let total = 0;
 

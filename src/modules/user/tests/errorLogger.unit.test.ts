@@ -25,10 +25,7 @@ describe("logError", () => {
     await logError("ERROR", "CRAWLER", "fetch failed");
 
     expect(mockSendAlert).toHaveBeenCalledTimes(1);
-    expect(mockSendAlert).toHaveBeenCalledWith(
-      "12345",
-      expect.stringContaining("爬蟲異常"),
-    );
+    expect(mockSendAlert).toHaveBeenCalledWith("12345", expect.stringContaining("爬蟲異常"));
     expect(alertAggregator.getState()).toBe("ALERTING");
   });
 
@@ -51,10 +48,7 @@ describe("logError", () => {
     await logError("FATAL", "CRAWLER", "process crashed");
 
     expect(mockSendAlert).toHaveBeenCalledTimes(1);
-    expect(mockSendAlert).toHaveBeenCalledWith(
-      "12345",
-      expect.stringContaining("[FATAL]"),
-    );
+    expect(mockSendAlert).toHaveBeenCalledWith("12345", expect.stringContaining("[FATAL]"));
   });
 });
 
@@ -67,10 +61,7 @@ describe("sendSummaryAlert", () => {
     await sendSummaryAlert();
 
     expect(mockSendAlert).toHaveBeenCalledTimes(1);
-    expect(mockSendAlert).toHaveBeenCalledWith(
-      "12345",
-      expect.stringContaining("錯誤統計摘要"),
-    );
+    expect(mockSendAlert).toHaveBeenCalledWith("12345", expect.stringContaining("錯誤統計摘要"));
   });
 
   it("does nothing when state is NORMAL", async () => {
@@ -88,10 +79,7 @@ describe("sendRecoveryAlert", () => {
     await sendRecoveryAlert();
 
     expect(mockSendAlert).toHaveBeenCalledTimes(1);
-    expect(mockSendAlert).toHaveBeenCalledWith(
-      "12345",
-      expect.stringContaining("恢復正常"),
-    );
+    expect(mockSendAlert).toHaveBeenCalledWith("12345", expect.stringContaining("恢復正常"));
     expect(alertAggregator.getState()).toBe("NORMAL");
   });
 });
