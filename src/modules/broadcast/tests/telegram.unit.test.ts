@@ -49,6 +49,7 @@ jest.mock("../commandHandler", () => ({
   executeList: jest.fn(),
   executeAdd: jest.fn(),
   executeDelete: jest.fn(),
+  executeBoardStats: jest.fn(),
   parseCommand: jest.fn(),
 }));
 

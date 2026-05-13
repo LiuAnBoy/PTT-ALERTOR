@@ -70,15 +70,28 @@ export async function matchArticle(board: string, title: string): Promise<MatchR
  */
 export function matchKeyword(title: string, keyword: string, userId: string): boolean {
   // Backward compatibility: strip legacy regexp: prefix
-  const pattern = keyword.startsWith("regexp:") ? keyword.slice(7) : keyword;
-  const regex = getRegex(pattern);
-  if (!regex) {
-    logError("WARN", "MATCHER", `Regex compile failed: ${pattern}`, {
-      keyword,
-      userId,
-      errorMsg: `Unsafe regex: ${pattern}`,
-    });
-    return false;
+  const stripped = keyword.startsWith("regexp:") ? keyword.slice(7) : keyword;
+
+  // AND mode: keyword contains '&' — every sub-pattern must match.
+  // Note: '&' is not a regex special char, so we don't lose any common patterns.
+  const subPatterns = stripped.includes("&")
+    ? stripped
+        .split("&")
+        .map((p) => p.trim())
+        .filter(Boolean)
+    : [stripped];
+
+  for (const pattern of subPatterns) {
+    const regex = getRegex(pattern);
+    if (!regex) {
+      logError("WARN", "MATCHER", `Regex compile failed: ${pattern}`, {
+        keyword,
+        userId,
+        errorMsg: `Unsafe regex: ${pattern}`,
+      });
+      return false;
+    }
+    if (!regex.test(title)) return false;
   }
-  return regex.test(title);
+  return true;
 }

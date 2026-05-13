@@ -61,6 +61,36 @@ describe("matchKeyword", () => {
     expect(matchKeyword("I love C++", "C++", "user1")).toBe(true);
     expect(matchKeyword("I love Java", "C++", "user1")).toBe(false);
   });
+
+  // Case 7: AND mode (containing '&') — every sub-pattern must match
+  describe("AND mode (a&b)", () => {
+    it("should match when title contains all sub-patterns", () => {
+      expect(matchKeyword("[PS5 ] 售 勇者鬥惡龍", "售&ps5", "user1")).toBe(true);
+      expect(matchKeyword("[PS5 ] 售 PS5 SLIM", "售&ps5", "user1")).toBe(true);
+    });
+
+    it("should not match when title is missing any sub-pattern", () => {
+      expect(matchKeyword("[PS5 ] 徵 羊蹄山戰鬼", "售&ps5", "user1")).toBe(false);
+      expect(matchKeyword("[PS4 ] 售 FFX", "售&ps5", "user1")).toBe(false);
+      expect(matchKeyword("[NS  ] 徵 瑪利歐", "售&ps5", "user1")).toBe(false);
+    });
+
+    it("should support more than two sub-patterns", () => {
+      expect(matchKeyword("售 PS5 SLIM 二手", "售&ps5&二手", "user1")).toBe(true);
+      expect(matchKeyword("售 PS5 SLIM 全新", "售&ps5&二手", "user1")).toBe(false);
+    });
+
+    it("should treat each sub-pattern as a regex", () => {
+      // First part is regex (^\[售\]), second part is literal-ish ps5
+      expect(matchKeyword("[售] PS5 主機", "^\\[售\\]&ps5", "user1")).toBe(true);
+      expect(matchKeyword("PS5 [售] 主機", "^\\[售\\]&ps5", "user1")).toBe(false);
+    });
+
+    it("should ignore empty parts produced by stray &", () => {
+      expect(matchKeyword("售 ps5", "售&&ps5", "user1")).toBe(true);
+      expect(matchKeyword("售 ps5", "&售&ps5&", "user1")).toBe(true);
+    });
+  });
 });
 
 describe("matchArticle", () => {

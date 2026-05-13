@@ -3,6 +3,7 @@ import { isPatternSafe } from "../subscription/services/regexCache";
 import { createChannel, findChannelByPlatformUserId } from "../user/repositories/channelRepository";
 import {
   addSubscription,
+  countByBoard,
   deleteSubscription,
   getSubscriptions,
   subscriptionExists,
@@ -24,6 +25,7 @@ export function parseCommand(text: string): { command: string; args: string } | 
   if (text === "清單") return { command: "list", args: "" };
   if (text.startsWith("新增")) return { command: "add", args: text.slice(2).trim() };
   if (text.startsWith("刪除")) return { command: "delete", args: text.slice(2).trim() };
+  if (text.startsWith("熱門")) return { command: "boardStats", args: text.slice(2).trim() };
   return null;
 }
 
@@ -76,15 +78,16 @@ export function executeHelp(): CommandResult {
     "  ➕ 新增 [看板] [關鍵字] — 新增訂閱",
     "  ➖ 刪除 [看板] [關鍵字] — 刪除訂閱",
     "  📋 清單 — 查看目前所有訂閱",
+    "  📊 熱門 [看板] — 看板熱門關鍵字（前 50）",
     "  ❓ 幫助 — 顯示本說明",
     "",
-    "📌 多關鍵字訂閱",
-    "  使用 & 同時新增多個關鍵字：",
-    "  新增 Gossiping 問卦&爆卦&閒聊",
+    "📌 AND 複合關鍵字（&）",
+    "  使用 & 串接，標題需同時含所有子關鍵字才推播：",
+    "  新增 Gamesale 售&ps5",
     "",
     "📌 正則表達式 (Regex)",
     "  所有關鍵字自動以正則比對（純文字也適用）：",
-    "  新增 Gossiping 問卦|爆卦",
+    "  新增 Gossiping 問卦|爆卦      ← OR",
     "  新增 Stock 台積電.*\\d+",
     "  新增 NBA ^(LBJ|Curry)",
     "",
@@ -141,7 +144,10 @@ export async function executeAdd(ctx: CommandContext, args: string): Promise<Com
     return { reply: "❌ 格式錯誤。用法：新增 [看板] [關鍵字]\n範例：新增 Gossiping 問卦" };
   }
 
-  const keywordStr = parts.slice(1).join(" ");
+  const keyword = parts.slice(1).join(" ").trim();
+  if (!keyword) {
+    return { reply: "❌ 關鍵字不可為空。" };
+  }
 
   // Validate board exists and resolve canonical name
   const boardName = await resolveBoard(parts[0]);
@@ -149,38 +155,37 @@ export async function executeAdd(ctx: CommandContext, args: string): Promise<Com
     return { reply: `❌ 查無此看板「${parts[0]}」。請確認看板名稱是否正確。` };
   }
 
-  // Split keywords by &
-  const keywords = keywordStr
-    .split("&")
-    .map((k) => k.trim())
-    .filter(Boolean);
+  // For AND-mode keywords (containing '&'), validate each part separately;
+  // otherwise validate the whole pattern.
+  const partsToCheck = keyword.includes("&") ? keyword.split("&").map((p) => p.trim()) : [keyword];
 
-  const results: string[] = [];
-  for (const keyword of keywords) {
-    // Validate regex safety (only check ReDoS for valid regex patterns)
+  // Reject malformed AND patterns (empty parts from '&&', leading/trailing '&').
+  if (partsToCheck.some((p) => !p)) {
+    return {
+      reply: "❌ 關鍵字格式錯誤：& 兩側不可為空（例：售&ps5，不接受 售&、&ps5、售&&ps5）。",
+    };
+  }
+
+  for (const part of partsToCheck) {
     try {
-      new RegExp(keyword);
-      if (!isPatternSafe(keyword)) {
-        results.push(`❌ 關鍵字「${keyword}」的正則過於複雜或過長，請簡化。`);
-        continue;
+      new RegExp(part);
+      if (!isPatternSafe(part)) {
+        return { reply: `❌ 關鍵字「${part}」的正則過於複雜或過長，請簡化。` };
       }
     } catch {
       // Invalid regex → will be auto-escaped for literal matching, no error needed
     }
-
-    // Check for duplicate
-    const exists = await subscriptionExists(user.id, boardName, keyword);
-    if (exists) {
-      results.push(`⚠️ 您已訂閱過「${boardName}」的關鍵字：${keyword}`);
-      continue;
-    }
-
-    await addSubscription(user.id, boardName, keyword);
-    await addSubscriptionToRedis(user.id, boardName, keyword);
-    results.push(`✅ 成功新增：[${boardName}] — ${keyword}`);
   }
 
-  return { reply: results.join("\n") };
+  // Check for duplicate
+  const exists = await subscriptionExists(user.id, boardName, keyword);
+  if (exists) {
+    return { reply: `⚠️ 您已訂閱過「${boardName}」的關鍵字：${keyword}` };
+  }
+
+  await addSubscription(user.id, boardName, keyword);
+  await addSubscriptionToRedis(user.id, boardName, keyword);
+  return { reply: `✅ 成功新增：[${boardName}] — ${keyword}` };
 }
 
 /**
@@ -211,6 +216,34 @@ export async function executeDelete(ctx: CommandContext, args: string): Promise<
   await deleteSubscription(user.id, boardName, keyword);
   await removeSubscriptionFromRedis(user.id, boardName, keyword);
   return { reply: `✅ 成功刪除關鍵字：[${boardName}] — ${keyword}` };
+}
+
+/**
+ * Handle 「熱門 [看板]」— show top subscribed keywords for a board.
+ */
+export async function executeBoardStats(args: string): Promise<CommandResult> {
+  const trimmed = args.trim();
+  if (!trimmed) {
+    return { reply: "❌ 格式錯誤。用法：熱門 [看板]\n範例：熱門 Gamesale" };
+  }
+
+  const boardName = await resolveBoard(trimmed);
+  if (!boardName) {
+    return { reply: `❌ 查無此看板「${trimmed}」。請確認看板名稱是否正確。` };
+  }
+
+  const rows = await countByBoard(boardName, 50);
+  if (rows.length === 0) {
+    return { reply: `📊 ${boardName} 目前無人訂閱關鍵字。` };
+  }
+
+  const padWidth = String(rows[0].subs).length;
+  const lines: string[] = [`📊 ${boardName} 熱門關鍵字（前 ${rows.length}）`, ""];
+  for (const { keyword, subs } of rows) {
+    lines.push(`${String(subs).padStart(padWidth)}  ${keyword}`);
+  }
+
+  return { reply: lines.join("\n") };
 }
 
 /**

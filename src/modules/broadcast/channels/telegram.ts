@@ -7,6 +7,7 @@ import { createLogger } from "../../../core/logger";
 import { clearErrors, getRecentErrors } from "../../user/services/errorLogger";
 import {
   executeAdd,
+  executeBoardStats,
   executeDelete,
   executeHelp,
   executeList,
@@ -152,6 +153,9 @@ async function handleText(ctx: Context) {
       break;
     case "delete":
       result = await executeDelete(cmdCtx, parsed.args);
+      break;
+    case "boardStats":
+      result = await executeBoardStats(parsed.args);
       break;
     default:
       return;

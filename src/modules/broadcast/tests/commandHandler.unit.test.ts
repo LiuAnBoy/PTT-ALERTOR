@@ -6,6 +6,7 @@
 
 import {
   executeAdd,
+  executeBoardStats,
   executeDelete,
   executeList,
   executeStart,
@@ -25,6 +26,7 @@ const mockDeleteSubscription = jest.fn();
 const mockResolveBoard = jest.fn();
 const mockAddToRedis = jest.fn();
 const mockRemoveFromRedis = jest.fn();
+const mockCountByBoard = jest.fn();
 
 jest.mock("../../../core/logger", () => ({
   createLogger: () => ({
@@ -49,6 +51,7 @@ jest.mock("../../user/repositories/subscriptionRepository", () => ({
   subscriptionExists: (...args: any[]) => mockSubscriptionExists(...args),
   addSubscription: (...args: any[]) => mockAddSubscription(...args),
   deleteSubscription: (...args: any[]) => mockDeleteSubscription(...args),
+  countByBoard: (...args: any[]) => mockCountByBoard(...args),
 }));
 
 jest.mock("../../user/services/boardValidator", () => ({
@@ -99,6 +102,13 @@ describe("parseCommand", () => {
     expect(parseCommand("刪除 Gossiping 問卦")).toEqual({
       command: "delete",
       args: "Gossiping 問卦",
+    });
+  });
+
+  it("should parse 熱門 with args", () => {
+    expect(parseCommand("熱門 Gamesale")).toEqual({
+      command: "boardStats",
+      args: "Gamesale",
     });
   });
 
@@ -280,6 +290,97 @@ describe("executeAdd", () => {
 
     expect(result.reply).toContain("正則過於複雜或過長");
     expect(mockAddSubscription).not.toHaveBeenCalled();
+  });
+
+  it("should store AND keyword (a&b) as a single subscription", async () => {
+    mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
+    mockResolveBoard.mockResolvedValue("Gamesale");
+    mockSubscriptionExists.mockResolvedValue(false);
+    mockAddSubscription.mockResolvedValue({});
+    mockAddToRedis.mockResolvedValue(undefined);
+
+    const result = await executeAdd(buildCtx(), "gamesale 售&ps5");
+
+    expect(result.reply).toBe("✅ 成功新增：[Gamesale] — 售&ps5");
+    expect(mockAddSubscription).toHaveBeenCalledTimes(1);
+    expect(mockAddSubscription).toHaveBeenCalledWith("user-1", "Gamesale", "售&ps5");
+    expect(mockAddToRedis).toHaveBeenCalledWith("user-1", "Gamesale", "售&ps5");
+  });
+
+  it("should reject AND keyword if any sub-pattern is unsafe regex", async () => {
+    mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
+    mockResolveBoard.mockResolvedValue("Gossiping");
+    // First part is safe, second part is unsafe
+    mockIsPatternSafe.mockReturnValueOnce(true).mockReturnValueOnce(false);
+
+    const result = await executeAdd(buildCtx(), "Gossiping good&(a+)+$");
+
+    expect(result.reply).toContain("正則過於複雜或過長");
+    expect(mockAddSubscription).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["lone &", "Gossiping &"],
+    ["doubled & in middle", "Gossiping 售&&ps5"],
+    ["trailing &", "Gossiping 售&"],
+    ["leading &", "Gossiping &ps5"],
+  ])("should reject malformed AND keyword (%s)", async (_label, args) => {
+    mockFindChannel.mockResolvedValue({ user: { id: "user-1" } });
+    mockResolveBoard.mockResolvedValue("Gossiping");
+
+    const result = await executeAdd(buildCtx(), args);
+
+    expect(result.reply).toMatch(/格式錯誤|不可為空/);
+    expect(mockAddSubscription).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeBoardStats", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("should return error when board name is empty", async () => {
+    const result = await executeBoardStats("");
+    expect(result.reply).toContain("格式錯誤");
+    expect(mockCountByBoard).not.toHaveBeenCalled();
+  });
+
+  it("should return error when board does not exist", async () => {
+    mockResolveBoard.mockResolvedValue(null);
+
+    const result = await executeBoardStats("FakeBoard");
+
+    expect(result.reply).toContain("查無此看板");
+    expect(mockCountByBoard).not.toHaveBeenCalled();
+  });
+
+  it("should return empty message when no subscriptions", async () => {
+    mockResolveBoard.mockResolvedValue("Gamesale");
+    mockCountByBoard.mockResolvedValue([]);
+
+    const result = await executeBoardStats("gamesale");
+
+    expect(result.reply).toContain("Gamesale");
+    expect(result.reply).toContain("目前無人訂閱");
+  });
+
+  it("should list keywords ordered with subscriber counts", async () => {
+    mockResolveBoard.mockResolvedValue("Gamesale");
+    mockCountByBoard.mockResolvedValue([
+      { keyword: "ps5", subs: 15 },
+      { keyword: "switch", subs: 12 },
+      { keyword: "售&ps5", subs: 8 },
+    ]);
+
+    const result = await executeBoardStats("gamesale");
+
+    expect(mockCountByBoard).toHaveBeenCalledWith("Gamesale", 50);
+    expect(result.reply).toContain("Gamesale 熱門關鍵字");
+    expect(result.reply).toContain("ps5");
+    expect(result.reply).toContain("switch");
+    expect(result.reply).toContain("售&ps5");
+    // Counts should appear in the output
+    expect(result.reply).toContain("15");
+    expect(result.reply).toContain("8");
   });
 });
 

@@ -55,3 +55,23 @@ export async function subscriptionExists(
   });
   return count > 0;
 }
+
+/**
+ * Count subscriptions per keyword for a board.
+ * @param board - The board name.
+ * @param limit - Maximum number of rows to return (sorted by subscriber count desc).
+ * @returns Array of `{ keyword, subs }` ordered by subs desc, then keyword asc.
+ */
+export async function countByBoard(
+  board: string,
+  limit = 50,
+): Promise<{ keyword: string; subs: number }[]> {
+  const rows = await getPrisma().subscription.groupBy({
+    by: ["keyword"],
+    where: { board },
+    _count: { _all: true },
+    orderBy: [{ _count: { keyword: "desc" } }, { keyword: "asc" }],
+    take: limit,
+  });
+  return rows.map((r) => ({ keyword: r.keyword, subs: r._count._all }));
+}

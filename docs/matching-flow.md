@@ -48,34 +48,30 @@
 
 ### matchKeyword(title, keyword)
 
-支援兩種模式：
+所有關鍵字都統一以正則表達式比對（不分大小寫）。流程：
 
-#### 1. 純文字匹配 (Plain Text Match)
+1. **Backward compat**：若以 `regexp:` 開頭則去掉前綴
+2. **AND 拆分**：若 keyword 含 `&`，按 `&` 拆成多個子 pattern；否則視為單一子 pattern
+3. **逐一比對**：每個子 pattern 透過 `getRegex()` 編譯後 `regex.test(title)`
+4. **AND 語意**：所有子 pattern 都需命中才回傳 true
 
-```
-關鍵字: "問卦"
-標題:   "[問卦] 有人跟我一樣嗎"
-→ title.toLowerCase().includes(keyword.toLowerCase())
-→ true (不分大小寫的子字串匹配)
-```
-
-#### 2. 正規表達式匹配 (Regex Match)
-
-使用 `regexp:` 前置詞觸發：
+#### 範例
 
 ```
-關鍵字: "regexp:問卦|爆卦"
-樣式: "問卦|爆卦"
-→ new RegExp(pattern, "i").test(title)
-→ true
+關鍵字: "問卦"             → /問卦/i.test(title)              ← 單一 pattern
+關鍵字: "問卦|爆卦"        → /問卦|爆卦/i.test(title)         ← regex OR
+關鍵字: "售&ps5"           → /售/i.test(title) && /ps5/i.test(title)  ← AND
+關鍵字: "regexp:問卦.*貓"  → /問卦.*貓/i.test(title)          ← legacy 前綴
+關鍵字: "C++"              → 無效 regex → escape 後 /C\+\+/i.test(title)
 ```
 
 ### 正規表達式快取 (Regex Cache)
 
 `regexCache.ts` 使用記憶體內 `Map<string, RegExp>` 快取已編譯的正規表達式，以避免重複編譯。
 
-- 同樣的樣式僅編譯一次
-- 無效樣式 → 回傳 null → `matchKeyword` 回傳 false + `logError`
+- 同樣的樣式僅編譯一次（AND 模式下每個子 pattern 各自快取）
+- 無效樣式 → escape 後當字面字串重新編譯 → 仍會被 cache
+- ReDoS 不安全的 pattern → 回傳 null → `matchKeyword` 回傳 false + `logError`
 
 ## Redis 資料結構
 
