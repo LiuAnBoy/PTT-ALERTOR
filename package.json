@@ -5,6 +5,7 @@
   "author": "CLA",
   "license": "Apache-2.0",
   "main": "dist/server.js",
+  "packageManager": "pnpm@10.32.1",
   "scripts": {
     "build": "tsc",
     "server": "nodemon --exec tsx src/server.ts --ext ts --watch src",
