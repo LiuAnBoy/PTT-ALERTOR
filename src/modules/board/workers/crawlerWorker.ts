@@ -35,7 +35,7 @@ export const crawlerWorker = new Worker(
       throw err;
     }
   },
-  { connection: bullmqConnection, concurrency: 5 },
+  { connection: bullmqConnection, concurrency: 5, autorun: false },
 );
 
 crawlerWorker.on("failed", (job, err) => {

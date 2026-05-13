@@ -30,7 +30,7 @@
 | Tool | Version | 安裝方式 |
 |------|---------|---------|
 | [Node.js](https://nodejs.org/) | 22+ | `brew install node` / [官方下載](https://nodejs.org/) |
-| [pnpm](https://pnpm.io/) | 9+ | `corepack enable && corepack prepare pnpm@latest --activate` |
+| [pnpm](https://pnpm.io/) | 10.32.1 (pinned via `packageManager`) | `corepack enable`（會自動使用 `package.json` 內 pinned 版本） |
 | [Docker](https://www.docker.com/) | 24+ | [Docker Desktop](https://www.docker.com/products/docker-desktop/) |
 | Telegram Bot Token | — | 從 [@BotFather](https://t.me/BotFather) 取得（見下方說明） |
 
@@ -201,6 +201,7 @@ cp .env.example .env
 | **Redis** ||||
 | `REDIS_HOST` | Yes | — | Redis host（Docker 內用 `redis`） |
 | `REDIS_PORT` | No | `6379` | Redis port |
+| `REDIS_DB` | No | `0` | Redis db index (0–15)，當共用 Redis instance 時用來隔離不同服務 |
 | **Telegram** ||||
 | `TELEGRAM_TOKEN` | Yes | — | Bot token（從 [@BotFather](https://t.me/BotFather) 取得） |
 | `TELEGRAM_BOT_USERNAME` | Yes | — | Bot username |

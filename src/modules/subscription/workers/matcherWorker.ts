@@ -55,7 +55,7 @@ export const matcherWorker = new Worker(
       });
     }
   },
-  { connection: bullmqConnection, concurrency: 5 },
+  { connection: bullmqConnection, concurrency: 5, autorun: false },
 );
 
 matcherWorker.on("failed", (job, err) => {

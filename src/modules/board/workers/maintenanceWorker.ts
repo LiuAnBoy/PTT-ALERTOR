@@ -16,7 +16,7 @@ export const maintenanceWorker = new Worker(
     logger.info(`Job ${job.id}: running cleanup`);
     await runCleanup();
   },
-  { connection: bullmqConnection },
+  { connection: bullmqConnection, autorun: false },
 );
 
 maintenanceWorker.on("failed", (job, err) => {

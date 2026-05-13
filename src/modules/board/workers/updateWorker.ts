@@ -19,7 +19,7 @@ export const updateWorker = new Worker(
     const updated = await updateActiveArticles();
     logger.info(`Job ${job.id}: updated ${updated} articles`);
   },
-  { connection: bullmqConnection },
+  { connection: bullmqConnection, autorun: false },
 );
 
 updateWorker.on("failed", (job, err) => {

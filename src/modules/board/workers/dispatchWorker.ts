@@ -17,7 +17,7 @@ export const dispatchWorker = new Worker(
     logger.debug(`Job ${job.id}: dispatching crawler jobs`);
     await dispatchCrawlerJobs();
   },
-  { connection: bullmqConnection },
+  { connection: bullmqConnection, autorun: false },
 );
 
 dispatchWorker.on("failed", (job, err) => {

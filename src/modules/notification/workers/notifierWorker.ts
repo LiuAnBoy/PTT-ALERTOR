@@ -27,6 +27,7 @@ export const notifierWorker = new Worker(
     connection: bullmqConnection,
     concurrency: 1,
     limiter: { max: 30, duration: 1_000 },
+    autorun: false,
   },
 );
 

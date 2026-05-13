@@ -108,6 +108,7 @@ Base image: `node:22-alpine`
 | `POSTGRES_DATABASE` | Yes | — | DB name |
 | `REDIS_HOST` | Yes | — | Redis host (docker: `redis`) |
 | `REDIS_PORT` | No | `6379` | Redis port |
+| `REDIS_DB` | No | `0` | Redis db index (0–15); used to isolate multiple services sharing one Redis instance |
 | `TELEGRAM_TOKEN` | Yes | — | Bot token from @BotFather |
 | `TELEGRAM_BOT_USERNAME` | Yes | — | Bot username |
 | `TELEGRAM_WEBHOOK_URL` | Yes | — | Public URL for webhook |

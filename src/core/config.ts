@@ -3,6 +3,20 @@ import dotenv from "dotenv";
 dotenv.config({ quiet: true });
 
 /**
+ * Parse REDIS_DB env var as a strict non-negative integer (0-15).
+ * Returns 0 when unset; throws on garbage input so we never silently
+ * fall back to db0 and accidentally flush another service's database.
+ */
+function parseRedisDb(raw: string | undefined): number {
+  if (raw === undefined || raw === "") return 0;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 15) {
+    throw new Error(`Invalid REDIS_DB="${raw}": must be a non-negative integer between 0 and 15.`);
+  }
+  return n;
+}
+
+/**
  * Centralized application configuration.
  * Reads from process.env once at module load time (after dotenv).
  * All other modules should import from here instead of reading process.env directly.
@@ -33,7 +47,7 @@ export const config = {
   redis: {
     host: process.env["REDIS_HOST"] ?? "",
     port: Number(process.env["REDIS_PORT"]) || 6379,
-    db: Number(process.env["REDIS_DB"]) || 0,
+    db: parseRedisDb(process.env["REDIS_DB"]),
   },
 
   /** Telegram bot */

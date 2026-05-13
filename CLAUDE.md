@@ -74,9 +74,9 @@ Scheduler (cron) → dispatchWorker → crawlerWorker → matcherWorker → noti
 | `user:{userId}:board:{board}` | SET | User's keywords for a board |
 | `board:latest` | HASH | Latest article timestamp per board (field=board) |
 | `active:articles` | ZSET | Active articles in 24h window (score=timestamp, member=`{board}:{code}`) |
-| `bull:{queue}:*` | mixed | BullMQ jobs/state — completed/failed pruned by `removeOnComplete`/`removeOnFail` (see `docs/maintenance.md`) |
+| `bull:{queue}:*` | mixed | BullMQ jobs/state — finalized completed/failed records pruned by `removeOnComplete`/`removeOnFail`. Scheduler / repeatable / delayed metadata is **not** capped by retention; cleared only by startup `flushdb`. See `docs/maintenance.md`. |
 
-App db is configurable via `REDIS_DB` env var (default 0). On startup `flushdb` (NOT `flushall`) clears only this db so other services on the same Redis instance are not affected.
+App db is configurable via `REDIS_DB` env var (default 0, validated 0-15). On startup `flushdb` (NOT `flushall`) clears only this db so other services on the same Redis instance are not affected.
 
 ### Database Schema
 

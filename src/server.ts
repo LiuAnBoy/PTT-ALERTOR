@@ -18,7 +18,7 @@ import { startScheduler, stopScheduler } from "./modules/board/workers/scheduler
 import { updateWorker } from "./modules/board/workers/updateWorker";
 import { startBot, stopBot } from "./modules/broadcast/channels/telegram";
 import { notifierWorker } from "./modules/notification/workers/notifierWorker";
-import { closeMatcherWorker } from "./modules/subscription/workers/matcherWorker";
+import { closeMatcherWorker, matcherWorker } from "./modules/subscription/workers/matcherWorker";
 import { seedArticleCache, syncSubscriptions } from "./modules/user/services/syncService";
 
 const logger = createLogger("SERVER");
@@ -35,11 +35,22 @@ async function bootstrap() {
   await connectRedis();
   await syncSubscriptions();
   await seedArticleCache();
+
+  // Workers were created with autorun:false so they don't start polling
+  // before flushdb + sync land. Kick them off now that Redis is in a
+  // consistent state. .run() returns a long-lived promise we don't await.
+  void dispatchWorker.run();
+  void crawlerWorker.run();
+  void updateWorker.run();
+  void maintenanceWorker.run();
+  void matcherWorker.run();
+  void notifierWorker.run();
+
   await startScheduler();
   await startBot();
 
   logger.info(
-    "Workers started: dispatchWorker, crawlerWorker, updateWorker, matcherWorker, notifierWorker",
+    "Workers started: dispatchWorker, crawlerWorker, updateWorker, maintenanceWorker, matcherWorker, notifierWorker",
   );
 
   const server = app.listen(config.port, () => {
