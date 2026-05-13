@@ -134,7 +134,7 @@ Base image: `node:22-alpine`
 ```
 1. StartupLogger.log()     ← 印出設定（mask 敏感值）
 2. connectDatabase()        ← Prisma $connect
-3. connectRedis()           ← ioredis connect + flushall
+3. connectRedis()           ← ioredis connect + flushdb（只清本服務 db，預設 db0）
 4. syncSubscriptions()      ← DB → Redis full sync
 5. startScheduler()         ← BullMQ repeatable jobs
 6. startBot()               ← Telegram webhook registration

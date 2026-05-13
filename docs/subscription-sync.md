@@ -14,7 +14,7 @@
 伺服器引導
   │
   ├── connectDatabase()
-  ├── connectRedis()       ← flushall（清除舊資料）
+  ├── connectRedis()       ← flushdb（只清本服務 db）
   ├── syncSubscriptions()  ← 全量同步訂閱
   ├── seedArticleCache()   ← 從 DB 回填 24h 內文章至 Redis
   ├── startScheduler()
@@ -45,9 +45,10 @@
    EXEC
 ```
 
-#### 為什麼使用 `flushall` + 全量同步？
+#### 為什麼使用 `flushdb` + 全量同步？
 
-- Redis 啟動時是空的（`connectRedis` 呼叫 `flushall`）。
+- Redis 啟動時把本服務的 db 清空（`connectRedis` 呼叫 `flushdb`，預設 db0）。
+  使用 `flushdb` 而非 `flushall`，避免影響共用 Redis instance 上其他服務的 db。
 - 確保 Redis 和資料庫完全一致，無殘留舊資料。
 - 單次 pipeline 批次寫入，效率最高。
 
@@ -142,7 +143,7 @@ handleDelete (Bot handler)
 
 ### 啟動植入 — 伺服器重啟時
 
-伺服器重啟時 `connectRedis()` 執行 `flushall`，Redis 資料全部清空。`seedArticleCache()` 從 DB 回填最近 24 小時的文章：
+伺服器重啟時 `connectRedis()` 執行 `flushdb`，本服務 db 清空（其他 db 不動）。`seedArticleCache()` 從 DB 回填最近 24 小時的文章：
 
 ```
 seedArticleCache()

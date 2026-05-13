@@ -110,16 +110,23 @@ ZREMRANGEBYSCORE active:articles -inf {cutoff_timestamp}
 - `/errors` — 列出最近 24 小時的錯誤（最多 50 筆）
 - `/errors clear` — 標記所有錯誤為已處理
 
-## BullMQ Job Retry
+## BullMQ Job Retry & Retention
 
-所有 queue 都設定 retry 策略：
+所有 queue 共用 `defaultJobOptions`：
 
 ```typescript
 defaultJobOptions: {
   attempts: 3,
   backoff: { type: "exponential", delay: 5_000 },
+  // Retention caps to prevent unbounded BullMQ growth in Redis.
+  removeOnComplete: { age: 3600, count: 1000 },
+  removeOnFail: { age: 86400 * 7, count: 5000 },
 }
 ```
+
+涵蓋的 queue：`crawler-queue`、`update-queue`、`maintenance-queue`、`dispatch-queue`、`notify-queue`、`matcher-queue`。
+
+### Retry 策略
 
 | Attempt | Delay |
 |---------|-------|
@@ -127,6 +134,15 @@ defaultJobOptions: {
 | 2nd retry | 10s |
 | 3rd retry | 20s |
 | 之後 | Job 標記為 failed，觸發 logError 告警 |
+
+### Retention 上限
+
+| 結果 | 上限 | 說明 |
+|------|------|------|
+| Completed | 1 hour OR 1000 筆 | BullMQ 自動 prune，先到先清 |
+| Failed | 7 days OR 5000 筆 | 保留較久供 debug |
+
+> **歷史教訓**：早期沒設 `removeOnComplete` / `removeOnFail`，Redis db0 在 2 個月內累積 ~250 萬個 BullMQ hash key（1.2 GB）。設定 retention 後 BullMQ 會自己清，不需要額外 cleanup job 處理 completed。
 
 ## Circuit Breaker（熔斷機制）
 
@@ -150,11 +166,11 @@ defaultJobOptions: {
 
 ## BullMQ Failed Job Cleanup
 
-`runCleanup`（每小時執行）會清理所有 queue 中超過 24 小時的 failed jobs：
+主要靠 `defaultJobOptions.removeOnFail` 由 BullMQ 在 finalize 時自動 prune（見上一節）。
+
+`runCleanup`（每小時執行）作為 backstop，呼叫 `queue.clean(24h, 100, "failed")` 補抓任何因為 retention 條件邊界沒被即時清掉的 failed jobs：
 
 ```
 crawlerQueue, updateQueue, maintenanceQueue, dispatchQueue
 → queue.clean(24h, 100, "failed")
 ```
-
-避免 failed jobs 在 Redis 中無限堆積。

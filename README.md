@@ -274,7 +274,7 @@ docker compose logs -f server
 ```
 1. 印出設定（mask 敏感值）
 2. 連接 PostgreSQL
-3. 連接 Redis（flushall 清除舊資料）
+3. 連接 Redis（flushdb 清除本服務 db 的舊資料；預設 db0）
 4. 同步訂閱資料 DB → Redis
 5. 啟動 BullMQ scheduler（crawl 1m / update 15m / cleanup 1h）
 6. 註冊 Telegram webhook
