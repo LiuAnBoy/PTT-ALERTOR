@@ -13,6 +13,9 @@ const logger = createLogger("SCHEDULER");
 const defaultJobOptions = {
   attempts: 3,
   backoff: { type: "exponential" as const, delay: 5_000 },
+  // Retention caps to prevent unbounded BullMQ growth in Redis.
+  removeOnComplete: { age: 3600, count: 1000 },
+  removeOnFail: { age: 86400 * 7, count: 5000 },
 };
 
 export const crawlerQueue = new Queue("crawler-queue", {

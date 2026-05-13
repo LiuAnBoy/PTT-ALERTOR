@@ -15,7 +15,14 @@ import { fetchHtml } from "./htmlFetcher";
 
 const logger = createLogger("CRAWLER");
 
-const matcherQueue = new Queue("matcher-queue", { connection: bullmqConnection });
+const matcherQueue = new Queue("matcher-queue", {
+  connection: bullmqConnection,
+  defaultJobOptions: {
+    // Retention caps to prevent unbounded BullMQ growth in Redis.
+    removeOnComplete: { age: 3600, count: 1000 },
+    removeOnFail: { age: 86400 * 7, count: 5000 },
+  },
+});
 
 /** Concurrency limit for PTT HTTP requests to avoid rate limiting. */
 const FETCH_CONCURRENCY = 5;
