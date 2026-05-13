@@ -9,4 +9,5 @@ import { config } from "./config";
 export const bullmqConnection: ConnectionOptions = {
   host: config.redis.host,
   port: config.redis.port,
+  db: config.redis.db,
 };
