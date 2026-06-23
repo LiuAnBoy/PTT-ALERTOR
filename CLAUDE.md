@@ -21,7 +21,7 @@ PTT Alertor 的爬蟲微服務。定時爬取 PTT 看板文章，比對使用者
 
 ```
 src/
-├── core/               # Shared infra (config, logger, redis, prisma, queue, maintenance, alertAggregator, circuitBreaker, roundTracker)
+├── core/               # Shared infra (config, logger, redis, prisma, queue, maintenance, alertAggregator, errorClassifier, circuitBreaker, roundTracker)
 ├── modules/
 │   ├── board/          # Article crawling & caching
 │   │   ├── repositories/   # articleRepository (Prisma)
@@ -61,7 +61,7 @@ Scheduler (cron) → dispatchWorker → crawlerWorker → matcherWorker → noti
 - **PostgreSQL**: source of truth (users, subscriptions, articles)
 - **Redis**: read cache (subscriptions) + article tracking + BullMQ queues
 - **CircuitBreaker**: PTT 故障時熔斷（CLOSED → OPEN → HALF_OPEN → CLOSED）
-- **AlertAggregator**: 錯誤告警聚合，避免通知轟炸（NORMAL → ALERTING → NORMAL）
+- **AlertAggregator**: 錯誤告警聚合，避免通知轟炸（NORMAL → ALERTING → NORMAL）；錯誤先經 `errorClassifier` 粗分類（5xx/4xx/逾時/解析/其他），故障期間每 30 分鐘節流進度告警，恢復時送含問題分布的報告
 - Startup 時 `syncSubscriptions()` 載入訂閱，`seedArticleCache()` 從 DB 回填 24h 內文章至 Redis
 - 爬蟲和比對在 hot path 中完全從 Redis 讀取，零 DB 查詢
 

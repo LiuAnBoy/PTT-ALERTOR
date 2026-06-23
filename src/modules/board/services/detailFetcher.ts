@@ -33,8 +33,27 @@ export const ARTICLE_DELETED = Symbol("ARTICLE_DELETED");
 export async function fetchDetail(
   link: string,
 ): Promise<ArticleDetail | typeof ARTICLE_DELETED | null> {
+  let data: string;
   try {
-    const { data } = await pttClient.get<string>(link);
+    ({ data } = await pttClient.get<string>(link));
+  } catch (error) {
+    const status = (error as { response?: { status: number } }).response?.status;
+
+    if (status === 404) {
+      logger.info(`Article deleted (404): ${link}`);
+      return ARTICLE_DELETED;
+    }
+
+    logger.warn(`Failed to fetch detail: ${link}`);
+    await logError("ERROR", "CRAWLER", `Detail fetch failed: ${link}`, {
+      url: link,
+      httpStatus: status,
+      errorMsg: (error as Error).message,
+    });
+    return null;
+  }
+
+  try {
     const $ = cheerio.load(data);
 
     // Extract IP before removing elements
@@ -75,16 +94,10 @@ export async function fetchDetail(
 
     return { ip, content, positive, negative, neutral, comments };
   } catch (error) {
-    const status = (error as { response?: { status: number } }).response?.status;
-
-    if (status === 404) {
-      logger.info(`Article deleted (404): ${link}`);
-      return ARTICLE_DELETED;
-    }
-
-    logger.warn(`Failed to fetch detail: ${link}`);
-    await logError("ERROR", "CRAWLER", `Detail fetch failed: ${link}`, {
+    logger.warn(`Failed to parse detail: ${link}`);
+    await logError("ERROR", "CRAWLER", `Detail parse failed: ${link}`, {
       url: link,
+      kind: "parse",
       parseError: (error as Error).message,
     });
     return null;
