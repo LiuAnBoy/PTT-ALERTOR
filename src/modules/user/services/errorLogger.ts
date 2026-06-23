@@ -1,5 +1,6 @@
 import { alertAggregator } from "../../../core/alertAggregator";
 import { config } from "../../../core/config";
+import { classifyError } from "../../../core/errorClassifier";
 import { createLogger } from "../../../core/logger";
 import { getPrisma } from "../../../core/prisma";
 import { getAdapter } from "../../broadcast/registry";
@@ -37,7 +38,7 @@ export async function logError(
     await sendAlert(`🚨 [FATAL] ${module} | ${message}`);
   } else if (level === "ERROR") {
     const wasNormal = alertAggregator.getState() === "NORMAL";
-    alertAggregator.recordError(module, message);
+    alertAggregator.recordError(classifyError(detail));
 
     if (wasNormal) {
       await sendAlert(alertAggregator.getFirstAlert());
@@ -46,21 +47,30 @@ export async function logError(
 }
 
 /**
- * Send an aggregated summary alert if currently in ALERTING state.
- * Intended to be called periodically (e.g. end of each crawl cycle).
+ * Send a throttled progress alert while an outage is ongoing (at most every
+ * 30 minutes). Marks the progress timestamp synchronously before awaiting the
+ * send so concurrent callers in the same event loop cannot both pass the gate.
  */
-export async function sendSummaryAlert(): Promise<void> {
-  if (alertAggregator.getState() !== "ALERTING") return;
-  await sendAlert(alertAggregator.getSummary());
+export async function sendProgressAlert(): Promise<void> {
+  const now = new Date();
+  if (!alertAggregator.shouldSendProgress(now)) return;
+  alertAggregator.markProgressSent(now);
+  await sendAlert(alertAggregator.getProgressAlert());
 }
 
 /**
- * Send a recovery notification and reset the aggregator back to NORMAL.
- * Should be called when a crawl cycle completes without errors.
+ * Send a recovery report and reset the aggregator back to NORMAL.
+ * Should be called when the crawler recovers (circuit CLOSED while ALERTING).
+ *
+ * Order matters: build the report (reads counters) BEFORE recover() clears
+ * them, and recover() synchronously flips state to NORMAL so a concurrent
+ * caller cannot send a duplicate recovery notification.
  */
 export async function sendRecoveryAlert(): Promise<void> {
-  await sendAlert(alertAggregator.getRecoveryMessage());
+  if (alertAggregator.getState() !== "ALERTING") return;
+  const message = alertAggregator.getRecoveryMessage();
   alertAggregator.recover();
+  await sendAlert(message);
 }
 
 /**

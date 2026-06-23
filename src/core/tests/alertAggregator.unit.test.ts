@@ -4,6 +4,8 @@ jest.mock("../logger", () => ({
 
 import { AlertAggregator } from "../alertAggregator";
 
+const THIRTY_MIN_MS = 30 * 60_000;
+
 let aggregator: AlertAggregator;
 
 beforeEach(() => {
@@ -18,13 +20,13 @@ describe("state transitions", () => {
   });
 
   it("should transition NORMAL → ALERTING on first error", () => {
-    aggregator.recordError("htmlFetcher", "connection timeout");
+    aggregator.recordError("TIMEOUT");
     expect(aggregator.getState()).toBe("ALERTING");
   });
 
   it("should remain in ALERTING on subsequent errors", () => {
-    aggregator.recordError("htmlFetcher", "timeout");
-    aggregator.recordError("detailFetcher", "404");
+    aggregator.recordError("TIMEOUT");
+    aggregator.recordError("HTTP_4XX");
     expect(aggregator.getState()).toBe("ALERTING");
   });
 });
@@ -32,30 +34,30 @@ describe("state transitions", () => {
 // ── Error accumulation ─────────────────────────────────────────────────────
 
 describe("error accumulation", () => {
-  it("should count errors per module", () => {
-    aggregator.recordError("htmlFetcher", "timeout");
-    aggregator.recordError("htmlFetcher", "timeout again");
-    aggregator.recordError("detailFetcher", "404");
+  it("should count errors per category", () => {
+    aggregator.recordError("HTTP_5XX");
+    aggregator.recordError("HTTP_5XX");
+    aggregator.recordError("TIMEOUT");
 
-    const counts = aggregator.getErrorCounts();
-    expect(counts.get("htmlFetcher")).toBe(2);
-    expect(counts.get("detailFetcher")).toBe(1);
+    const counts = aggregator.getCategoryCounts();
+    expect(counts.get("HTTP_5XX")).toBe(2);
+    expect(counts.get("TIMEOUT")).toBe(1);
   });
 
   it("should track total errors", () => {
-    aggregator.recordError("htmlFetcher", "err1");
-    aggregator.recordError("htmlFetcher", "err2");
-    aggregator.recordError("detailFetcher", "err3");
+    aggregator.recordError("HTTP_5XX");
+    aggregator.recordError("HTTP_5XX");
+    aggregator.recordError("TIMEOUT");
 
     expect(aggregator.getTotalErrors()).toBe(3);
   });
 
-  it("should return a copy of error counts (not the internal map)", () => {
-    aggregator.recordError("htmlFetcher", "err");
-    const counts = aggregator.getErrorCounts();
-    counts.set("htmlFetcher", 999);
+  it("should return a copy of category counts (not the internal map)", () => {
+    aggregator.recordError("HTTP_5XX");
+    const counts = aggregator.getCategoryCounts();
+    counts.set("HTTP_5XX", 999);
 
-    expect(aggregator.getErrorCounts().get("htmlFetcher")).toBe(1);
+    expect(aggregator.getCategoryCounts().get("HTTP_5XX")).toBe(1);
   });
 });
 
@@ -68,7 +70,7 @@ describe("startedAt tracking", () => {
 
   it("should be set when entering ALERTING state", () => {
     const before = new Date();
-    aggregator.recordError("htmlFetcher", "error");
+    aggregator.recordError("HTTP_5XX");
     const after = new Date();
 
     const startedAt = aggregator.getStartedAt();
@@ -78,10 +80,10 @@ describe("startedAt tracking", () => {
   });
 
   it("should keep the original startedAt on subsequent errors", () => {
-    aggregator.recordError("htmlFetcher", "first");
+    aggregator.recordError("HTTP_5XX");
     const first = aggregator.getStartedAt();
 
-    aggregator.recordError("htmlFetcher", "second");
+    aggregator.recordError("HTTP_5XX");
     expect(aggregator.getStartedAt()).toBe(first);
   });
 });
@@ -90,38 +92,38 @@ describe("startedAt tracking", () => {
 
 describe("getFirstAlert", () => {
   it('should contain "爬蟲異常"', () => {
-    aggregator.recordError("htmlFetcher", "timeout");
-    const alert = aggregator.getFirstAlert();
-    expect(alert).toContain("爬蟲異常");
+    aggregator.recordError("HTTP_5XX");
+    expect(aggregator.getFirstAlert()).toContain("爬蟲異常");
   });
 
-  it("should include the timestamp", () => {
-    aggregator.recordError("htmlFetcher", "timeout");
-    const alert = aggregator.getFirstAlert();
-    const startedAt = aggregator.getStartedAt();
-    expect(alert).toContain(startedAt!.toISOString());
+  it("should describe the first error category", () => {
+    aggregator.recordError("HTTP_5XX");
+    expect(aggregator.getFirstAlert()).toContain("PTT 伺服器錯誤(5xx)");
   });
 });
 
-// ── getSummary ─────────────────────────────────────────────────────────────
+// ── getProgressAlert ───────────────────────────────────────────────────────
 
-describe("getSummary", () => {
-  it("should list per-module error counts", () => {
-    aggregator.recordError("htmlFetcher", "err");
-    aggregator.recordError("htmlFetcher", "err");
-    aggregator.recordError("detailFetcher", "err");
+describe("getProgressAlert", () => {
+  it("should include accumulated total and per-category breakdown", () => {
+    aggregator.recordError("HTTP_5XX");
+    aggregator.recordError("HTTP_5XX");
+    aggregator.recordError("TIMEOUT");
 
-    const summary = aggregator.getSummary();
-    expect(summary).toContain("htmlFetcher: 2");
-    expect(summary).toContain("detailFetcher: 1");
+    const alert = aggregator.getProgressAlert();
+    expect(alert).toContain("爬蟲持續異常中");
+    expect(alert).toContain("累計：3 次");
+    expect(alert).toContain("PTT 伺服器錯誤(5xx)：2 次");
+    expect(alert).toContain("連線逾時/中斷：1 次");
   });
 
-  it("should include the total count", () => {
-    aggregator.recordError("htmlFetcher", "err");
-    aggregator.recordError("detailFetcher", "err");
+  it("should sort the breakdown by count descending", () => {
+    aggregator.recordError("TIMEOUT");
+    aggregator.recordError("HTTP_5XX");
+    aggregator.recordError("HTTP_5XX");
 
-    const summary = aggregator.getSummary();
-    expect(summary).toContain("總計: 2");
+    const alert = aggregator.getProgressAlert();
+    expect(alert.indexOf("PTT 伺服器錯誤(5xx)")).toBeLessThan(alert.indexOf("連線逾時/中斷"));
   });
 });
 
@@ -129,19 +131,67 @@ describe("getSummary", () => {
 
 describe("getRecoveryMessage", () => {
   it('should contain "恢復正常"', () => {
-    aggregator.recordError("htmlFetcher", "err");
-    const msg = aggregator.getRecoveryMessage();
-    expect(msg).toContain("恢復正常");
+    aggregator.recordError("HTTP_5XX");
+    expect(aggregator.getRecoveryMessage()).toContain("恢復正常");
   });
 
-  it("should include duration and total errors", () => {
-    aggregator.recordError("htmlFetcher", "err");
-    aggregator.recordError("htmlFetcher", "err2");
+  it("should include the outage period, total and breakdown", () => {
+    aggregator.recordError("HTTP_5XX");
+    aggregator.recordError("HTTP_5XX");
 
     const msg = aggregator.getRecoveryMessage();
-    expect(msg).toContain("持續時間:");
+    expect(msg).toContain("異常期間：");
     expect(msg).toContain("分鐘");
-    expect(msg).toContain("累計錯誤: 2");
+    expect(msg).toContain("累計錯誤：2 次");
+    expect(msg).toContain("PTT 伺服器錯誤(5xx)：2 次");
+  });
+});
+
+// ── progress throttle ──────────────────────────────────────────────────────
+
+describe("progress throttle", () => {
+  it("should never send progress in NORMAL state", () => {
+    expect(aggregator.shouldSendProgress(new Date())).toBe(false);
+  });
+
+  it("should not send before 30 minutes have elapsed", () => {
+    aggregator.recordError("HTTP_5XX");
+    const start = aggregator.getStartedAt()!;
+
+    const justUnder = new Date(start.getTime() + THIRTY_MIN_MS - 1000);
+    expect(aggregator.shouldSendProgress(justUnder)).toBe(false);
+  });
+
+  it("should send once 30 minutes have elapsed", () => {
+    aggregator.recordError("HTTP_5XX");
+    const start = aggregator.getStartedAt()!;
+
+    const atThreshold = new Date(start.getTime() + THIRTY_MIN_MS);
+    expect(aggregator.shouldSendProgress(atThreshold)).toBe(true);
+  });
+
+  it("should require another 30 minutes after marking progress sent", () => {
+    aggregator.recordError("HTTP_5XX");
+    const start = aggregator.getStartedAt()!;
+
+    const firstSend = new Date(start.getTime() + THIRTY_MIN_MS);
+    aggregator.markProgressSent(firstSend);
+
+    expect(
+      aggregator.shouldSendProgress(new Date(firstSend.getTime() + THIRTY_MIN_MS - 1000)),
+    ).toBe(false);
+    expect(aggregator.shouldSendProgress(new Date(firstSend.getTime() + THIRTY_MIN_MS))).toBe(true);
+  });
+
+  it("should not reset the progress baseline on subsequent errors (no per-round reset)", () => {
+    aggregator.recordError("HTTP_5XX");
+    const start = aggregator.getStartedAt()!;
+
+    // Many later errors must NOT push back the progress window.
+    aggregator.recordError("HTTP_5XX");
+    aggregator.recordError("TIMEOUT");
+
+    expect(aggregator.shouldSendProgress(new Date(start.getTime() + THIRTY_MIN_MS))).toBe(true);
   });
 });
 
@@ -149,7 +199,7 @@ describe("getRecoveryMessage", () => {
 
 describe("recover", () => {
   it("should transition ALERTING → NORMAL", () => {
-    aggregator.recordError("htmlFetcher", "err");
+    aggregator.recordError("HTTP_5XX");
     expect(aggregator.getState()).toBe("ALERTING");
 
     aggregator.recover();
@@ -157,12 +207,12 @@ describe("recover", () => {
   });
 
   it("should reset all counters", () => {
-    aggregator.recordError("htmlFetcher", "err");
-    aggregator.recordError("detailFetcher", "err");
+    aggregator.recordError("HTTP_5XX");
+    aggregator.recordError("TIMEOUT");
     aggregator.recover();
 
     expect(aggregator.getTotalErrors()).toBe(0);
-    expect(aggregator.getErrorCounts().size).toBe(0);
+    expect(aggregator.getCategoryCounts().size).toBe(0);
     expect(aggregator.getStartedAt()).toBeNull();
   });
 });
@@ -171,13 +221,15 @@ describe("recover", () => {
 
 describe("reset", () => {
   it("should clear all state back to initial", () => {
-    aggregator.recordError("htmlFetcher", "err");
-    aggregator.recordError("detailFetcher", "err");
+    aggregator.recordError("HTTP_5XX");
+    aggregator.recordError("TIMEOUT");
+    aggregator.markProgressSent(new Date());
     aggregator.reset();
 
     expect(aggregator.getState()).toBe("NORMAL");
     expect(aggregator.getTotalErrors()).toBe(0);
-    expect(aggregator.getErrorCounts().size).toBe(0);
+    expect(aggregator.getCategoryCounts().size).toBe(0);
     expect(aggregator.getStartedAt()).toBeNull();
+    expect(aggregator.shouldSendProgress(new Date())).toBe(false);
   });
 });

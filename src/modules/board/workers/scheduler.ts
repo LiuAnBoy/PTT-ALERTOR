@@ -6,7 +6,7 @@ import { createLogger } from "../../../core/logger";
 import { bullmqConnection } from "../../../core/queue";
 import { redis } from "../../../core/redis";
 import { roundTracker } from "../../../core/roundTracker";
-import { sendRecoveryAlert, sendSummaryAlert } from "../../user/services/errorLogger";
+import { sendProgressAlert, sendRecoveryAlert } from "../../user/services/errorLogger";
 
 const logger = createLogger("SCHEDULER");
 
@@ -89,7 +89,7 @@ export async function dispatchCrawlerJobs(): Promise<string[]> {
       logger.info("Circuit HALF_OPEN: dispatching probe round");
     } else {
       logger.warn(`Circuit OPEN: skipping dispatch for ${boards.length} boards`);
-      await sendSummaryAlert();
+      await sendProgressAlert();
       return [];
     }
   }

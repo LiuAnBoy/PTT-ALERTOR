@@ -206,8 +206,23 @@ describe("fetchDetail", () => {
     expect(mockLogError).toHaveBeenCalledWith(
       "ERROR",
       "CRAWLER",
-      expect.stringContaining(TEST_LINK),
-      expect.objectContaining({ url: TEST_LINK }),
+      expect.stringContaining("Detail fetch failed"),
+      expect.objectContaining({ url: TEST_LINK, httpStatus: 500 }),
+    );
+  });
+
+  it("should classify a parse failure with kind:'parse' (not as a network error)", async () => {
+    // Resolve with a non-string body so cheerio.load throws → parse branch.
+    mockGet.mockResolvedValueOnce({ data: 42 });
+
+    const result = await fetchDetail(TEST_LINK);
+
+    expect(result).toBeNull();
+    expect(mockLogError).toHaveBeenCalledWith(
+      "ERROR",
+      "CRAWLER",
+      expect.stringContaining("Detail parse failed"),
+      expect.objectContaining({ url: TEST_LINK, kind: "parse" }),
     );
   });
 
@@ -224,7 +239,7 @@ describe("fetchDetail", () => {
       expect.stringContaining("Detail fetch failed"),
       expect.objectContaining({
         url: TEST_LINK,
-        parseError: "ECONNREFUSED",
+        errorMsg: "ECONNREFUSED",
       }),
     );
   });

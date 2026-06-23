@@ -92,14 +92,28 @@ ZREMRANGEBYSCORE active:articles -inf {cutoff_timestamp}
 
 **狀態機**: `NORMAL → ALERTING → NORMAL`
 
+每筆 ERROR 會先經 `errorClassifier.ts` 的 `classifyError(detail)` 歸入粗分類，再交給 aggregator 累計。分類依 `detail` 的結構化欄位判斷（非 message 字串）：
+
+| 分類 | 判斷依據 | 顯示 |
+|------|----------|------|
+| `HTTP_5XX` | `detail.httpStatus` 500–599 | PTT 伺服器錯誤(5xx) |
+| `HTTP_4XX` | `detail.httpStatus` 400–499 | 用戶端/權限錯誤(4xx) |
+| `TIMEOUT` | 訊息含 `ETIMEDOUT`/`ECONNRESET`/`ECONNREFUSED`/`ECONNABORTED`/`timeout` | 連線逾時/中斷 |
+| `PARSE` | `detail.kind === "parse"`（產生端明確標記） | 頁面解析失敗 |
+| `OTHER` | 其餘 | 其他錯誤 |
+
 | 事件 | 行為 |
 |------|------|
-| 第一筆 ERROR | 立即推送首則告警，進入 ALERTING 狀態 |
-| 後續 ERROR（ALERTING 中） | 僅計數（按 module 分組），不推播 |
-| Circuit Breaker OPEN 期間 | 每輪 dispatch 發送聚合摘要 |
-| 恢復正常 | 推送恢復通知（含故障持續時間和統計），重置計數器 |
+| 第一筆 ERROR | 立即推送首則告警（含首個錯誤分類），進入 ALERTING 狀態 |
+| 後續 ERROR（ALERTING 中） | 僅按分類計數，不推播 |
+| Circuit Breaker OPEN 期間 | 每 30 分鐘最多推送一則進度告警（`sendProgressAlert()` 以 `lastProgressAt` 節流） |
+| 恢復正常 | 推送恢復報告（異常期間起訖、持續分鐘、累計次數、各分類次數），再重置計數器 |
 
-實作於 `src/core/alertAggregator.ts`（in-memory singleton），由 `errorLogger.ts` 的 `logError()` 觸發。
+**訊息類型**：首次告警（⚠️）、進度告警（⏳，每 30 分節流）、恢復報告（✅，含問題分布）。恢復報告務必在 `recover()` 清除計數器**之前**產生。
+
+實作於 `src/core/alertAggregator.ts`（in-memory singleton），由 `errorLogger.ts` 的 `logError()` / `sendProgressAlert()` / `sendRecoveryAlert()` 觸發。
+
+> **已知限制**：aggregator 為單一 Node process 內的 in-memory singleton，節流與防重採「先 mark 再 send」。若未來拆成多 process / 多容器，需改用 Redis-backed 節流與鎖。
 
 ### Worker 失敗告警
 
@@ -159,7 +173,7 @@ defaultJobOptions: {
 
 **OPEN 期間行為**:
 - crawlerWorker 檢查 circuit 狀態，若 OPEN 則跳過執行
-- dispatchCrawlerJobs 發送聚合摘要告警
+- dispatchCrawlerJobs 呼叫 `sendProgressAlert()`（每 30 分鐘最多一則進度告警，非每輪洗版）
 - 不會完全停止排程，只是 worker 端 skip
 
 實作於 `src/core/circuitBreaker.ts`（singleton `crawlerCircuit`）和 `src/core/roundTracker.ts`（追蹤每輪成功/失敗數）。
