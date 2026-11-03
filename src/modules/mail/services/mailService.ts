@@ -6,7 +6,7 @@ import { createLogger } from "../../../core/logger";
 import { getArticleForMail } from "../../board/repositories/articleRepository";
 import { ARTICLE_DELETED, fetchDetail } from "../../board/services/detailFetcher";
 import { getAdapter } from "../../broadcast/registry";
-import type { NotificationPayload } from "../../broadcast/types";
+import type { ButtonRows, NotificationPayload } from "../../broadcast/types";
 import { findSubscription } from "../../user/repositories/subscriptionRepository";
 import * as mailRequests from "../repositories/mailRequestRepository";
 import { MAX_MAIL_ATTEMPTS } from "../repositories/mailRequestRepository";
@@ -274,8 +274,6 @@ export async function enqueueVerifyJob(data: VerifyJobData): Promise<void> {
 // Reporting
 // ---------------------------------------------------------------------------
 
-type Buttons = { text: string; action: string }[][];
-
 /**
  * Tell the user the outcome. Edits the notification message when the request remembers it and
  * the adapter can; otherwise (or when the edit fails) sends a new message. Never throws.
@@ -286,7 +284,7 @@ type Buttons = { text: string; action: string }[][];
 async function report(
   target: { chatId: string | null; messageId?: string | null },
   text: string,
-  buttons?: Buttons,
+  buttons?: ButtonRows,
 ): Promise<void> {
   if (!target.chatId) {
     logger.warn("Mail result not reported: no chat id on record");

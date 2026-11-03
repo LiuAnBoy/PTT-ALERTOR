@@ -32,6 +32,12 @@ export interface ActionButton {
 /** Rows of action buttons shown under a message. */
 export type ButtonRows = ActionButton[][];
 
+/** Reference to a message the bot sent: where it lives, to edit or reply to it later. */
+export interface MessageRef {
+  chatId: string;
+  messageId: string;
+}
+
 /**
  * Result of a command handler.
  * Shared logic returns this; the adapter sends the reply.
@@ -76,8 +82,14 @@ export interface PlatformAdapter {
    * Send a notification message with platform-specific formatting.
    * @param chatId - The chat/channel ID.
    * @param payload - The notification payload.
+   * @param buttons - Optional rows of action buttons shown under the notification.
+   * @returns The sent message reference, or nothing when the platform cannot provide one.
    */
-  sendNotification(chatId: string, payload: NotificationPayload): Promise<void>;
+  sendNotification(
+    chatId: string,
+    payload: NotificationPayload,
+    buttons?: ButtonRows,
+  ): Promise<MessageRef | void>;
 
   /**
    * Send an admin alert message.
@@ -87,16 +99,14 @@ export interface PlatformAdapter {
   sendAlert(chatId: string, text: string): Promise<void>;
 
   /**
-   * Edit a message this bot sent earlier (optional; callers fall back to `sendReply`).
-   * @param target - The chat and message to edit.
-   * @param text - The new message text.
-   * @param buttons - Rows of action buttons to show; omitted removes any keyboard.
+   * Report a status on a message this bot sent earlier (optional; callers fall back to
+   * `sendReply`). The original message text stays as it was.
+   * @param target - The chat and message the status belongs to.
+   * @param text - The status text, posted as a reply to that message.
+   * @param buttons - Rows of action buttons the message shows afterwards; omitted removes
+   *   any keyboard.
    */
-  updateMessage?(
-    target: { chatId: string; messageId: string },
-    text: string,
-    buttons?: ButtonRows,
-  ): Promise<void>;
+  updateMessage?(target: MessageRef, text: string, buttons?: ButtonRows): Promise<void>;
 
   /** Rate limit config for the notification worker */
   readonly rateLimit: { max: number; duration: number };

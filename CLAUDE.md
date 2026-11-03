@@ -5,7 +5,7 @@
 
 ## What is this?
 
-PTT Alertor 的爬蟲微服務。定時爬取 PTT 看板文章，比對使用者訂閱的關鍵字，透過 Telegram 推播通知。
+PTT Alertor 的爬蟲微服務。定時爬取 PTT 看板文章，比對使用者訂閱的關鍵字，透過 Telegram 推播通知；通知上可附按鈕，用使用者綁定的 PTT 帳號寄站內信給作者。
 
 ## Tech Stack
 
@@ -21,7 +21,7 @@ PTT Alertor 的爬蟲微服務。定時爬取 PTT 看板文章，比對使用者
 
 ```
 src/
-├── core/               # Shared infra (config, logger, redis, prisma, queue, maintenance, alertAggregator, errorClassifier, circuitBreaker, roundTracker)
+├── core/               # Shared infra (config, logger, redis, prisma, queue, crypto, maintenance, alertAggregator, errorClassifier, circuitBreaker, roundTracker)
 ├── modules/
 │   ├── board/          # Article crawling & caching
 │   │   ├── repositories/   # articleRepository (Prisma)
@@ -33,14 +33,20 @@ src/
 │   │   ├── services/       # matcherService, regexCache
 │   │   └── workers/        # matcherWorker
 │   ├── broadcast/      # Multi-platform command & notification
-│   │   ├── types.ts        # CommandContext, PlatformAdapter, CommandResult
+│   │   ├── types.ts        # CommandContext, PlatformAdapter, CommandResult, ButtonRows, MessageRef
 │   │   ├── registry.ts     # Platform adapter registry
 │   │   ├── commandHandler.ts # Shared command logic (platform-agnostic)
+│   │   ├── pendingState.ts # Multi-step input state in Redis (mail:pending:<platformUserId>)
 │   │   └── channels/       # One file per platform
-│   │       └── telegram.ts # Telegram: bot + receive + send + format
+│   │       └── telegram.ts # Telegram: bot + receive + send + format + button callbacks
 │   ├── notification/   # Push notification dispatch
-│   │   ├── services/       # notifierService (multi-platform via adapter)
+│   │   ├── services/       # notifierService (multi-platform via adapter, mail button)
 │   │   └── workers/        # notifierWorker
+│   ├── mail/           # Mail the article author from a notification (PTT terminal)
+│   │   ├── repositories/   # mailRequestRepository, pttAccountRepository
+│   │   ├── services/       # mailService, pttTerminal
+│   │   ├── workers/        # mailQueue, mailWorker
+│   │   └── tests/          # Unit + integration + live (PTT_LIVE=1) tests
 │   └── user/           # User management
 │       ├── repositories/   # userRepository, channelRepository, subscriptionRepository
 │       └── services/       # syncService, boardValidator, errorLogger
@@ -56,12 +62,15 @@ src/
 Scheduler (cron) → dispatchWorker → crawlerWorker → matcherWorker → notifierWorker
                         ↕                 ↕
                    CircuitBreaker ←── RoundTracker ──→ AlertAggregator
+
+mail button / 綁定PTT → mail-queue → mailWorker → PTT terminal (WebSocket)
 ```
 
-- **PostgreSQL**: source of truth (users, subscriptions, articles)
+- **PostgreSQL**: source of truth (users, subscriptions, articles, PTT accounts, mail requests)
 - **Redis**: read cache (subscriptions) + article tracking + BullMQ queues
 - **CircuitBreaker**: PTT 故障時熔斷（CLOSED → OPEN → HALF_OPEN → CLOSED）
 - **AlertAggregator**: 錯誤告警聚合，避免通知轟炸（NORMAL → ALERTING → NORMAL）；錯誤先經 `errorClassifier` 粗分類（5xx/4xx/逾時/解析/其他），故障期間每 30 分鐘節流進度告警，恢復時送含問題分布的報告
+- **Mail queue**: `mail-queue`（`send` 寄信、`verify` 驗證綁定）由 `mailWorker` 以併發 1、每 5 秒 1 個 job 執行，`attempts: 1` 不自動重試。持久狀態只在 Postgres 的 `MailRequest`（claim 在交易內原子完成，一封信最多寄出一次），Redis 被 flush 時由啟動的 `recoverInFlight` 復原；密碼只以 AES-256-GCM 密文存放與傳遞。需同時設定 `PTT_ENCRYPT_KEY` 與 `TELEGRAM_WEBHOOK_SECRET` 才啟用。見 `docs/mail-flow.md`
 - Startup 時 `syncSubscriptions()` 載入訂閱，`seedArticleCache()` 從 DB 回填 24h 內文章至 Redis
 - 爬蟲和比對在 hot path 中完全從 Redis 讀取，零 DB 查詢
 
@@ -74,13 +83,14 @@ Scheduler (cron) → dispatchWorker → crawlerWorker → matcherWorker → noti
 | `user:{userId}:board:{board}` | SET | User's keywords for a board |
 | `board:latest` | HASH | Latest article timestamp per board (field=board) |
 | `active:articles` | ZSET | Active articles in 24h window (score=timestamp, member=`{board}:{code}`) |
+| `mail:pending:<platformUserId>` | STRING | Pending multi-step input (bind ID, bind password, reply text) as JSON, never the password; TTL 300s, cleared by any recognised command |
 | `bull:{queue}:*` | mixed | BullMQ jobs/state — finalized completed/failed records pruned by `removeOnComplete`/`removeOnFail`. Scheduler / repeatable / delayed metadata is **not** capped by retention; cleared only by startup `flushdb`. See `docs/maintenance.md`. |
 
 App db is configurable via `REDIS_DB` env var (default 0, validated 0-15). On startup `flushdb` (NOT `flushall`) clears only this db so other services on the same Redis instance are not affected.
 
 ### Database Schema
 
-5 models: `User`, `Channel`, `Subscription`, `Article`, `CrawlerLog`. See `prisma/schema.prisma`.
+7 models: `User`, `Channel`, `Subscription`, `Article`, `CrawlerLog`, `PttAccount`, `MailRequest`. See `prisma/schema.prisma`.
 
 ## Development Commands
 
@@ -88,7 +98,7 @@ App db is configurable via `REDIS_DB` env var (default 0, validated 0-15). On st
 pnpm server              # Dev server (nodemon + tsx, hot reload)
 pnpm build               # TypeScript compile
 pnpm start               # Production start
-pnpm test:unit           # Unit tests only (*.unit.test.ts, ~117 cases)
+pnpm test:unit           # Unit tests only (*.unit.test.ts, ~392 cases)
 pnpm test:integration    # Integration tests (requires DB/Redis)
 pnpm test:cov            # Coverage report
 pnpm lint                # ESLint check
@@ -155,11 +165,12 @@ pnpm format              # Prettier format
 
 | Document | Content |
 |----------|---------|
-| [README.md](README.md) | 專案全貌、Quick Start、部署、環境變數 |
+| [README.md](README.md) | 專案全貌、Quick Start、部署、環境變數、PTT 寄信功能與帳密聲明 |
 | [docs/architecture.md](docs/architecture.md) | 系統架構、模組結構、設計決策 |
 | [docs/crawling-flow.md](docs/crawling-flow.md) | 爬蟲流程、HTML 解析規則、文章快取 |
 | [docs/matching-flow.md](docs/matching-flow.md) | 關鍵字比對演算法、Redis 資料結構 |
-| [docs/notification-flow.md](docs/notification-flow.md) | 推播流程、速率限制、錯誤處理 |
+| [docs/notification-flow.md](docs/notification-flow.md) | 推播流程、速率限制、寄信按鈕、錯誤處理 |
+| [docs/mail-flow.md](docs/mail-flow.md) | 寄信請求、狀態、mail-queue、啟動復原、失敗處理 |
 | [docs/subscription-sync.md](docs/subscription-sync.md) | DB ↔ Redis 同步、cascading cleanup |
 | [docs/bot-commands.md](docs/bot-commands.md) | Telegram Bot 指令、routing 邏輯 |
 | [docs/maintenance.md](docs/maintenance.md) | 清理策略、文章生命週期、錯誤告警 |

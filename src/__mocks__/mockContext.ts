@@ -24,6 +24,7 @@ export function createMockContext(overrides?: {
     reply: jest.fn().mockResolvedValue({}),
     deleteMessage: jest.fn().mockResolvedValue(true),
     editMessageText: jest.fn().mockResolvedValue(true),
+    editMessageReplyMarkup: jest.fn().mockResolvedValue(true),
     answerCallbackQuery: jest.fn().mockResolvedValue(true),
     callbackQuery:
       overrides?.callbackData !== undefined ? { data: overrides.callbackData } : undefined,

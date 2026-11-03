@@ -257,6 +257,12 @@ handler 本身不連 PTT，也不記錄密碼。聲明內容見 `PTT_DISCLAIMER`
 | 前綴 | 用途 |
 |------|------|
 | `sub:` | 回信設定卡（見上表） |
+| `mail:<id>` | 通知上的「✉️ 寄信給 <作者>」按鈕，`<id>` 是 `MailRequest` id；流程見 [notification-flow.md](notification-flow.md#寄信按鈕) |
+| `mail:noop` | 領取成功後取代寄信按鈕的「⏳ 寄送中…」，只回應 callback，不做任何事 |
+
+`mail:<id>` 把按下按鈕的 Telegram 使用者解析成 User（與其他指令相同，查 `Channel`），再呼叫 `requestMail(id, userId)`。
+成功領取時把訊息的 inline keyboard 換成「⏳ 寄送中…」；任何拒絕都只用 `describeRequestOutcome` 的文字回應 callback，
+並且不動訊息。
 
 每次按鈕都會呼叫 `answerCallbackQuery`（出錯時也是），以結束 Telegram 端的載入動畫。
 

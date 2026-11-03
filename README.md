@@ -9,6 +9,7 @@
 - **即時推播** — 透過 Telegram Bot 推送通知，速率限制 30 msg/s
 - **AND 複合關鍵字** — 用 `&` 串接，標題需同時命中所有子關鍵字才推播
 - **看板熱門關鍵字** — `熱門 [看板]` 查詢該看板被訂閱的關鍵字排行
+- **一鍵寄信給作者** — 通知上的按鈕用你綁定的 PTT 副帳號寄站內信給文章作者（選用，見 [PTT 寄信功能與帳密聲明](#ptt-寄信功能與帳密聲明)）
 - **自動清理** — 過期文章和 log 自動清除
 - **錯誤告警** — FATAL/ERROR 自動推送給 admin，可透過 `/errors` 查看
 
@@ -102,6 +103,8 @@ curl http://localhost:8000/health
 | 刪除 | 刪除訂閱 | `刪除 Gossiping 問卦` |
 | 清單 | 查看訂閱 | `清單` |
 | 熱門 | 看板熱門關鍵字 | `熱門 Gamesale` |
+| 綁定PTT | 綁定寄信用的 PTT 副帳號（僅限私訊，需啟用寄信功能） | `綁定PTT` |
+| 解除PTT | 刪除已儲存的 PTT 帳號與密碼 | `解除PTT` |
 | 幫助 | 使用說明 | `幫助` |
 | `/errors` | 查看最近錯誤（Admin） | `/errors` |
 
@@ -122,6 +125,56 @@ curl http://localhost:8000/health
 新增 Soft_Job C++
 ```
 
+## PTT 寄信功能與帳密聲明
+
+收到通知後，想直接回信給賣家或作者時，可以在通知上按一顆按鈕，由伺服器用**你自己綁定的 PTT 帳號**從 PTT 主選單寄一封站內信（`M` → `S`）給文章作者，信件主旨是 `Re: <文章標題>`。這項功能是選用的：沒有同時設定 `PTT_ENCRYPT_KEY` 與 `TELEGRAM_WEBHOOK_SECRET` 時整個功能關閉，所有寄信指令會回覆「寄信功能目前未啟用」，通知也不會出現按鈕。
+
+### 帳密聲明
+
+要寄信就必須交出 PTT 密碼，請先了解它如何被處理：
+
+- 密碼以 AES-256-GCM 加密後儲存在資料庫，只在寄信（或驗證登入）的當下於記憶體中解密，不會寫入記錄檔。
+- 伺服器管理者持有加密金鑰，**在技術上仍然可以解密這份密碼**。
+- 請使用專門寄信的 PTT 副帳號，**不要使用你的主要帳號**。
+- 輸入「解除PTT」會立刻刪除已儲存的帳號與密碼。
+
+綁定時機器人會先顯示同樣的聲明，內容與程式中的 `PTT_DISCLAIMER`（`commandHandler.ts`）一致。你傳給機器人的密碼訊息會在讀取後立刻被刪除；如果機器人無法刪除，會請你手動刪除。
+
+### 使用方式
+
+1. **綁定 PTT 帳號** — 在與機器人的私訊中輸入 `綁定PTT`，依序輸入 PTT 帳號與密碼。機器人回覆「驗證中…」，登入驗證在背景執行，成功後通知你已綁定；密碼錯誤、兩步驟驗證帳號（不支援）或連線失敗會說明原因。群組中不能綁定。
+2. **設定回信內容** — 輸入 `新增 [看板] [關鍵字]` 後，回覆下方的設定卡按鈕；或輸入 `清單`，按訂閱旁的 `⚙️` 按鈕。設定卡可以設定回信內容（最多 2000 字）、切換是否附上原文（預設關閉，開啟時信件內文接著以 PTT 引文格式 `※ 引述《作者》之銘言：` 引述整篇文章）、清除回信內容。
+3. **按通知上的按鈕** — 訂閱有回信內容、帳號已綁定、文章有作者時，通知底下會出現 `✉️ 寄信給 <作者>`。按一下就寄出，沒有預覽步驟。只有收到這則通知的使用者按得動它。
+4. **看結果** — 結果會以回覆的方式出現在原通知底下，通知本文不變。
+
+### 寄信結果
+
+| 結果 | 意義 | 接下來 |
+|------|------|--------|
+| SENT | 已確認寄出，訊息「已寄給 <作者>」 | 同一篇文章不會再出現按鈕 |
+| FAILED | 確定沒有寄出（例如連線逾時、找不到收件人、PTT 忙碌） | 訊息附「再試一次」按鈕，可以重按 |
+| UNKNOWN | 存檔之後無法確認信是否寄出 | 請到 PTT 信箱的寄件備份確認；為避免重複寄信，不會自動重試也不再提供按鈕 |
+
+PTT 密碼錯誤時帳號會被標記為失效，之後不再提供按鈕，也不會再用這組密碼登入（避免帳號被鎖），請重新 `綁定PTT`。
+
+### 次數限制
+
+- 每位使用者每天（台北時間）最多領取 `MAIL_DAILY_LIMIT` 次寄信，預設 20；失敗後重按也會計入。
+- 同一篇文章最多嘗試 3 次，用完後不再提供按鈕。
+- 同一篇文章對同一位使用者最多寄出一次；連按兩次只有第一次會被受理。
+
+### 啟用寄信功能
+
+在 `.env` 設定下列三個變數，缺一則功能關閉（變數說明見下方 [Environment Variables](#environment-variables)）：
+
+```bash
+PTT_ENCRYPT_KEY=$(openssl rand -base64 32)        # 加密儲存的 PTT 密碼；更換後既有密碼無法解密，使用者需重新綁定
+TELEGRAM_WEBHOOK_SECRET=$(openssl rand -hex 32)   # 驗證 Telegram webhook 來源
+MAIL_DAILY_LIMIT=20                               # 選用
+```
+
+流程、狀態與失敗處理見 [docs/mail-flow.md](docs/mail-flow.md)。
+
 ## Architecture
 
 ```
@@ -130,10 +183,13 @@ Scheduler (1 min)
         └── crawlerWorker: 爬取 HTML → 過濾新文章 → 儲存 DB/Redis
               └── matcherWorker: 比對關鍵字 → 找出匹配
                     └── notifierWorker: Telegram 推播（30 msg/s rate limit）
+
+mail-queue（寄信按鈕與綁定 PTT 帳號觸發）
+  └── mailWorker: 登入 PTT 終端機 → 寄站內信 / 驗證帳號 → 回報結果
 ```
 
 ```
-[PostgreSQL] ◄──── source of truth (users, subscriptions, articles)
+[PostgreSQL] ◄──── source of truth (users, subscriptions, articles, PTT accounts, mail requests)
      │
      │ startup sync
      ▼
@@ -147,7 +203,7 @@ Scheduler (1 min)
 | `pnpm server` | 開發伺服器 (nodemon + tsx, 熱重載) |
 | `pnpm build` | TypeScript 編譯 |
 | `pnpm start` | 生產環境啟動 |
-| `pnpm test:unit` | 單元測試 (117 個案例) |
+| `pnpm test:unit` | 單元測試 (392 個案例) |
 | `pnpm test:integration` | 整合測試 (需 DB/Redis) |
 | `pnpm test:cov` | 測試覆蓋率報告 |
 | `pnpm lint` | ESLint 檢查 |
@@ -161,7 +217,8 @@ Scheduler (1 min)
 | [架構設計 (Architecture)](docs/architecture.md) | 系統架構、模組結構、設計決策 |
 | [爬取流程 (Crawling Flow)](docs/crawling-flow.md) | 爬蟲流程、HTML 解析規則、文章快取 |
 | [比對流程 (Matching Flow)](docs/matching-flow.md) | 關鍵字比對演算法、Redis 資料結構 |
-| [通知流程 (Notification Flow)](docs/notification-flow.md) | 推播流程、速率限制、錯誤處理 |
+| [通知流程 (Notification Flow)](docs/notification-flow.md) | 推播流程、速率限制、寄信按鈕、錯誤處理 |
+| [寄信流程 (Mail Flow)](docs/mail-flow.md) | 寄信請求、狀態、mail-queue、失敗處理 |
 | [訂閱同步 (Subscription Sync)](docs/subscription-sync.md) | DB ↔ Redis 同步機制、連鎖清理 (cascading cleanup) |
 | [機器人指令 (Bot Commands)](docs/bot-commands.md) | Telegram Bot 指令一覽、路由邏輯 |
 | [維護與清理 (Maintenance)](docs/maintenance.md) | 清理策略、文章生命週期、錯誤告警機制 |
@@ -206,7 +263,11 @@ cp .env.example .env
 | `TELEGRAM_TOKEN` | Yes | — | Bot token（從 [@BotFather](https://t.me/BotFather) 取得） |
 | `TELEGRAM_BOT_USERNAME` | Yes | — | Bot username |
 | `TELEGRAM_WEBHOOK_URL` | Yes | — | Public URL，Telegram 會將 update POST 到此 |
+| `TELEGRAM_WEBHOOK_SECRET` | No | — | Webhook 驗證密鑰，`openssl rand -hex 32` 產生；只能含 `A-Z a-z 0-9 _ -`、最長 256 字元，否則啟動失敗。設定後沒帶正確 header 的請求一律拒絕。**PTT 寄信功能需要它與 `PTT_ENCRYPT_KEY` 同時設定** |
 | `ADMIN_TELEGRAM_ID` | No | — | 填入你的 chat ID 即可接收 FATAL/ERROR 告警 |
+| **PTT 寄信** ||||
+| `PTT_ENCRYPT_KEY` | No | — | 加密 PTT 密碼的金鑰：恰好 32 bytes 的 base64，`openssl rand -base64 32` 產生；設定但長度不對則啟動失敗。**未設定（或缺 `TELEGRAM_WEBHOOK_SECRET`）時寄信功能關閉** |
+| `MAIL_DAILY_LIMIT` | No | `20` | 每位使用者每天（台北時間）可領取的寄信次數 |
 
 ## Deployment
 
@@ -299,21 +360,24 @@ Bot webhook → Workers → Scheduler → HTTP server → Redis → PostgreSQL
 ```
 src/
 ├── __mocks__/          # 共享模擬工廠 (Redis, Prisma, Bot, Context)
-├── core/               # 設定、日誌、Prisma、Redis、隊列、維護任務
+├── core/               # 設定、日誌、加解密、Prisma、Redis、隊列、維護任務
 ├── modules/
 │   ├── board/          # 爬蟲、解析、快取、文章儲存庫
 │   │   └── tests/     # 單元測試 + 整合測試
 │   ├── broadcast/      # 多平台指令與通知層
 │   │   ├── commandHandler.ts   # 共享指令邏輯 (與平台無關)
+│   │   ├── pendingState.ts     # 多步驟輸入狀態 (Redis)
 │   │   ├── registry.ts         # 平台適配器註冊表
 │   │   ├── types.ts            # CommandContext, PlatformAdapter 等
 │   │   ├── channels/
-│   │   │   └── telegram.ts     # Telegram：接收 + 發送 + 格式化
+│   │   │   └── telegram.ts     # Telegram：接收 + 發送 + 格式化 + 按鈕 callback
 │   │   └── tests/     # 單元測試
 │   ├── subscription/   # 關鍵字比對、正規表達式快取
 │   │   └── tests/     # 單元測試
 │   ├── notification/   # 推播通知工作器與服務
 │   │   └── tests/     # 單元測試
+│   ├── mail/           # 寄信給作者：PTT 終端機客戶端、寄信服務、mail-queue
+│   │   └── tests/     # 單元測試 + 整合測試 + 實機測試
 │   └── user/           # 使用者/頻道/訂閱儲存庫、同步、錯誤日誌
 │       └── tests/     # 單元測試
 ├── middlewares/         # Express 錯誤處理中間件

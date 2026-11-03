@@ -42,6 +42,17 @@ jest.mock("../../user/services/errorLogger", () => ({
   logError: jest.fn().mockResolvedValue(undefined),
 }));
 
+const mockOfferMail = jest.fn();
+const mockSetMessageRef = jest.fn();
+
+jest.mock("../../mail/services/mailService", () => ({
+  offerMail: (...a: unknown[]) => mockOfferMail(...a),
+}));
+
+jest.mock("../../mail/repositories/mailRequestRepository", () => ({
+  setMessageRef: (...a: unknown[]) => mockSetMessageRef(...a),
+}));
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function buildPayload(overrides: Partial<NotificationPayload> = {}): NotificationPayload {
@@ -87,6 +98,7 @@ describe("isPermanentError", () => {
 describe("sendNotification", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockOfferMail.mockResolvedValue(null);
   });
 
   it("should send notification via adapter and return true", async () => {
@@ -235,5 +247,63 @@ describe("sendNotification", () => {
       where: { id: "user-1" },
       select: { enable: true, channels: true },
     });
+  });
+});
+
+describe("sendNotification mail button", () => {
+  const channels = [{ id: "ch-1", platform: "TELEGRAM", platformChatId: "chat-1" }];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.user.findUnique.mockResolvedValue({ enable: true, channels });
+    mockSetMessageRef.mockResolvedValue(undefined);
+  });
+
+  it("passes the mail button when offerMail returns an id", async () => {
+    mockOfferMail.mockResolvedValue("req-1");
+    mockAdapter.sendNotification.mockResolvedValue(undefined);
+
+    await sendNotification(buildPayload());
+
+    expect(mockAdapter.sendNotification).toHaveBeenCalledWith("chat-1", buildPayload(), [
+      [{ text: "✉️ 寄信給 testauthor", action: "mail:req-1" }],
+    ]);
+  });
+
+  it("sends no button when offerMail returns null", async () => {
+    mockOfferMail.mockResolvedValue(null);
+    mockAdapter.sendNotification.mockResolvedValue({ chatId: "chat-1", messageId: "9" });
+
+    await sendNotification(buildPayload());
+
+    expect(mockAdapter.sendNotification).toHaveBeenCalledWith("chat-1", buildPayload());
+    expect(mockSetMessageRef).not.toHaveBeenCalled();
+  });
+
+  it("still sends the notification, without a button, when offerMail throws", async () => {
+    mockOfferMail.mockRejectedValue(new Error("db down"));
+    mockAdapter.sendNotification.mockResolvedValue(undefined);
+
+    const result = await sendNotification(buildPayload());
+
+    expect(result).toBe(true);
+    expect(mockAdapter.sendNotification).toHaveBeenCalledWith("chat-1", buildPayload());
+  });
+
+  it("stores the sent message reference on the MailRequest", async () => {
+    mockOfferMail.mockResolvedValue("req-1");
+    mockAdapter.sendNotification.mockResolvedValue({ chatId: "chat-1", messageId: "77" });
+
+    await sendNotification(buildPayload());
+
+    expect(mockSetMessageRef).toHaveBeenCalledWith("req-1", "chat-1", "77");
+  });
+
+  it("does not fail the notification when storing the reference fails", async () => {
+    mockOfferMail.mockResolvedValue("req-1");
+    mockAdapter.sendNotification.mockResolvedValue({ chatId: "chat-1", messageId: "77" });
+    mockSetMessageRef.mockRejectedValue(new Error("db down"));
+
+    await expect(sendNotification(buildPayload())).resolves.toBe(true);
   });
 });
