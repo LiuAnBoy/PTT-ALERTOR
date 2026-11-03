@@ -247,11 +247,15 @@ handler 本身不連 PTT，也不記錄密碼。`CommandContext.text` 是去除�
 
 多步驟輸入（綁定帳號、綁定密碼、回信內容）的狀態存在 Redis key `mail:pending:<platformUserId>`
 （JSON：`step` 與必要資料，不含密碼；TTL 300 秒）。`handleText` 在 `parseCommand` 之前先呼叫
-`handlePending()`：
+`handlePending()`，依 pending 的步驟處理：
 
-- 有 pending 且文字不是已知指令 → 依步驟處理這則文字。
-- 文字是已知指令（含 `綁定PTT` 本身）→ 清除 pending，照常執行該指令。PTT 密碼是 ASCII，不會與中文指令混淆。
+- 綁定密碼步驟：下一則文字一律是密碼，不經指令解析。`熱門…`、`新增…`、`清單`、`幫助`、`綁定PTT` 這類文字也一樣被當成密碼：
+  先刪除訊息，再加密並入列驗證，不會執行任何指令，也不會被回覆引用。這個步驟沒有「取消」字樣，
+  等待 5 分鐘 pending 過期即取消（密碼提示中會說明）。
+- 綁定帳號步驟：下一則文字一律是 PTT 帳號、格式錯誤的提示，或恰好等於 `取消`（清除 pending 並結束綁定）；
+  不經指令解析。
 - 綁定帳號與綁定密碼兩個步驟只在私訊中進行：在群組收到時清除 pending 並拒絕，密碼訊息仍會先被刪除。
+- 回信內容步驟：文字是已知指令（含 `綁定PTT` 本身）→ 清除 pending，照常執行該指令；否則存為回信內容。
 - 讀取密碼後立即清除 pending。
 - 啟動時 Redis `flushdb` 會一併清掉 pending，使用者重新輸入 `綁定PTT` 即可。
 

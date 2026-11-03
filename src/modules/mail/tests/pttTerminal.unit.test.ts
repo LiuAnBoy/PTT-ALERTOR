@@ -122,6 +122,16 @@ describe("decideLogin", () => {
   });
 
   it.each([
+    ["任意鍵", "有一篇文章尚未完成\r\n請按任意鍵繼續"],
+    ["duplicate login", "請選擇暫存檔\r\n您想刪除其他重複登入的連線嗎？[Y/n]"],
+    ["main menu", "有一篇文章尚未完成，是否繼續？\r\n【主功能表】 (G)oodbye"],
+  ])("a draft prompt followed by %s on one screen still gets no key", (_name, screen) => {
+    const d = decideLogin(screen, afterPw, loginInput);
+    expect(d.kind).toBe("error");
+    expect((d as { error: PttError }).error.code).toBe("UnfinishedDraft");
+  });
+
+  it.each([
     ["draft picker", "請選擇暫存檔 (0-9)"],
     ["unfinished article", "有一篇文章尚未完成，是否繼續？"],
   ])("stops with UnfinishedDraft on the %s prompt and sends no key", (_name, screen) => {

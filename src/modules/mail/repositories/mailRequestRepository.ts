@@ -41,16 +41,20 @@ export function taipeiDayStart(now: Date): Date {
 
 /**
  * Record an offer for (userId, articleCode). An existing row is returned unchanged,
- * so a row past OFFERED is never overwritten.
+ * so a row past OFFERED is never overwritten. A unique-key race with a concurrent offer
+ * (Prisma P2002) is resolved by reading the row the other offer created.
  * @param input - Offer fields.
  * @returns The stored row; check `status` to see whether it is a fresh offer.
  */
 export async function upsertOffer(input: MailOfferInput): Promise<MailRequest> {
-  return getPrisma().mailRequest.upsert({
-    where: { userId_articleCode: { userId: input.userId, articleCode: input.articleCode } },
-    create: input,
-    update: {},
-  });
+  const where = { userId_articleCode: { userId: input.userId, articleCode: input.articleCode } };
+  try {
+    return await getPrisma().mailRequest.upsert({ where, create: input, update: {} });
+  } catch (err) {
+    // Two concurrent offers for one article race on the unique key; the loser reads the winner.
+    if ((err as { code?: string }).code !== "P2002") throw err;
+    return getPrisma().mailRequest.findUniqueOrThrow({ where });
+  }
 }
 
 /**

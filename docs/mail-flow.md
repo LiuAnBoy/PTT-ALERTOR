@@ -34,7 +34,7 @@
 
 ### 資格判斷與 offer
 
-`checkEligibility` 全部成立才給按鈕：寄信功能啟用（`config.mail.enabled`）、文章有作者、以 `userId + board + keyword` 找到的訂閱 `replyContent` 非空、使用者已綁定 PTT 帳號且未標記失效。`offerMail` 之後對 `(userId, articleCode)` 呼叫 `upsertOffer`；一列對應一篇文章，且保留最先建立時的關鍵字。只有列的 `keyword` 等於這則通知的關鍵字，且列仍為 `OFFERED`，或為 `FAILED` 且嘗試次數未滿，才回傳 request id（即按鈕 id）。同一篇文章符合使用者另一個關鍵字的通知拿不到按鈕，因為按下去會用另一個關鍵字的回信內容寄信；已寄出或不明的文章也不再出現按鈕。
+`checkEligibility` 全部成立才給按鈕：寄信功能啟用（`config.mail.enabled`）、文章有作者、以 `userId + board + keyword` 找到的訂閱 `replyContent` 非空、使用者已綁定 PTT 帳號且未標記失效。`offerMail` 之後對 `(userId, articleCode)` 呼叫 `upsertOffer`；一列對應一篇文章，且保留最先建立時的關鍵字。兩個關鍵字的通知同時建立同一列時，輸的一方遇到唯一鍵衝突（Prisma `P2002`），改讀贏的那一列，再套用下面的關鍵字規則。只有列的 `keyword` 等於這則通知的關鍵字，且列仍為 `OFFERED`，或為 `FAILED` 且嘗試次數未滿，才回傳 request id（即按鈕 id）。同一篇文章符合使用者另一個關鍵字的通知拿不到按鈕，因為按下去會用另一個關鍵字的回信內容寄信；已寄出或不明的文章也不再出現按鈕。
 
 ### 按下按鈕
 
@@ -77,7 +77,7 @@
 - `not_sent` → `FAILED`，並依原因：`WrongPassword` 把帳號標記失效（`invalidAt`）並提示重新綁定；`TwoFactorRequired` 回報不支援；`UnfinishedDraft` 請使用者先登入 PTT 一次，完成或放棄未完成的文章草稿再試；`NoSuchUser`、`PttBusy`、`Timeout`、`ConnectFailed` 等回報原因。嘗試次數未滿且不是帳密問題時，訊息附「再試一次」按鈕（`mail:<id>`）。
 - 呼叫 `sendPttMail` 之前發生的內部錯誤 → `FAILED`；呼叫之後發生的 → `UNKNOWN`，因為信可能已寄出。
 
-`pttTerminal` 的登入只在送出密碼之後才把主選單當成成功，並且在連線前就拒絕 `guest`、`new`（不分大小寫）這兩個不需密碼的代號。登入時若出現「有一篇文章尚未完成」或「請選擇暫存檔」，客戶端回報 `UnfinishedDraft`，不送出 `Q`、`S` 或任何暫存檔編號，直接關閉連線，使用者的草稿不會被丟棄或存入暫存檔。
+`pttTerminal` 的登入只在送出密碼之後才把主選單當成成功，並且在連線前就拒絕 `guest`、`new`（不分大小寫）這兩個不需密碼的代號。登入時只要尚未回應的畫面上任何位置出現「有一篇文章尚未完成」或「請選擇暫存檔」，客戶端就在處理其他提示之前回報 `UnfinishedDraft`：同一個畫面上之後的任意鍵、重複登入或主選單提示也不會收到任何按鍵。它不送出 `Q`、`S` 或任何暫存檔編號，直接關閉連線，使用者的草稿不會被丟棄或存入暫存檔。
 
 ### verify job
 

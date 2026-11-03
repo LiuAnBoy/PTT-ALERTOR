@@ -31,6 +31,8 @@ const MAX_BUTTON_LABEL = 40;
 const MAX_LIST_BUTTONS = 100;
 /** Longest password accepted (PTT only reads the first 8 characters). */
 const MAX_PASSWORD_LENGTH = 64;
+/** The word that abandons the bind flow at the ID step. */
+const BIND_CANCEL = "取消";
 const RESERVED_PTT_IDS = new Set(["guest", "new"]);
 
 /** Shown when a mail command is used while the feature is switched off. */
@@ -502,8 +504,10 @@ export async function executeSubAction(
 
 /**
  * Consume the user's message when the bot is waiting for one (bind ID, password, reply text).
- * A recognised command clears the wait and returns null so it runs normally; PTT passwords
- * are ASCII, so no password can be mistaken for a command.
+ * The bind steps consume every text before any command parsing: at the password step the text
+ * is the password whatever it looks like, and at the ID step it is an ID, a validation error,
+ * or the exact word 取消 (the wait also expires on its own). At the reply-text step a
+ * recognised command clears the wait and returns null so it runs normally.
  * @param ctx - The command context of the incoming text.
  * @returns The reply, or null when nothing was pending or the text is a command.
  */
@@ -511,31 +515,37 @@ export async function handlePending(ctx: CommandContext): Promise<CommandResult 
   const pending = await getPending(ctx.platformUserId);
   if (!pending) return null;
 
+  if (pending.step === "bindPassword") {
+    await clearPending(ctx.platformUserId);
+    // Outside a private chat receivePassword still deletes the message, then refuses.
+    return receivePassword(ctx, pending.pttId);
+  }
+  if (pending.step === "bindId") {
+    if (!ctx.isPrivate) {
+      await clearPending(ctx.platformUserId);
+      return { reply: "❌ 請在私訊中綁定 PTT。" };
+    }
+    if (ctx.text === BIND_CANCEL) {
+      await clearPending(ctx.platformUserId);
+      return { reply: "已取消綁定 PTT。" };
+    }
+    if (!isValidPttId(ctx.text)) {
+      return {
+        reply: `❌ PTT 帳號格式不正確（英文字母開頭，2 到 12 個英數字，不可為 guest 或 new）。請重新輸入，或輸入「${BIND_CANCEL}」放棄：`,
+      };
+    }
+    await setPending(ctx.platformUserId, { step: "bindPassword", pttId: ctx.text });
+    return {
+      reply: `請輸入 ${ctx.text} 的密碼。我會在收到後刪除該訊息。你的下一則訊息一律視為密碼；5 分鐘內沒有輸入會自動取消。`,
+    };
+  }
+
   if (parseCommand(ctx.text)) {
     await clearPending(ctx.platformUserId);
     return null;
   }
 
   switch (pending.step) {
-    case "bindId": {
-      if (!ctx.isPrivate) {
-        await clearPending(ctx.platformUserId);
-        return { reply: "❌ 請在私訊中綁定 PTT。" };
-      }
-      if (!isValidPttId(ctx.text)) {
-        return {
-          reply:
-            "❌ PTT 帳號格式不正確（英文字母開頭，2 到 12 個英數字，不可為 guest 或 new）。請重新輸入：",
-        };
-      }
-      await setPending(ctx.platformUserId, { step: "bindPassword", pttId: ctx.text });
-      return { reply: `請輸入 ${ctx.text} 的密碼。我會在收到後刪除該訊息。` };
-    }
-    case "bindPassword": {
-      await clearPending(ctx.platformUserId);
-      // Outside a private chat receivePassword still deletes the message, then refuses.
-      return receivePassword(ctx, pending.pttId);
-    }
     case "replyText": {
       if (ctx.text.length > MAX_REPLY_LENGTH) {
         return { reply: `❌ 回信內容太長（上限 ${MAX_REPLY_LENGTH} 字），請縮短後重新輸入：` };

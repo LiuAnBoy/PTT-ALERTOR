@@ -227,6 +227,11 @@ export function assertRealPttId(id: string): void {
  * @returns Wait, finish, fail with a typed error, or send keys.
  */
 export function decideLogin(screen: string, state: LoginState, input: LoginInput): LoginDecision {
+  // The user's own draft is never answered: any key could save it to a slot or discard it. The
+  // check covers the whole unanswered screen, so no later prompt on it receives a key either.
+  if (/有一篇文章尚未完成|請選擇暫存檔/.test(screen)) {
+    return { kind: "error", error: new PttError("UnfinishedDraft") };
+  }
   if (/系統過載/.test(screen)) return { kind: "error", error: new PttError("PttBusy") };
   if (/此帳號已設定為只能使用安全連線/.test(screen)) {
     return { kind: "error", error: new PttError("SecureConnectionRequired") };
@@ -244,15 +249,11 @@ export function decideLogin(screen: string, state: LoginState, input: LoginInput
     keys: typeof keys === "string" ? key(keys) : keys,
     next,
   });
-  const draftError: LoginDecision = { kind: "error", error: new PttError("UnfinishedDraft") };
   const decision = pickLatest<LoginDecision>(screen, [
     { pattern: MAIN_MENU, enabled: state.passwordSent, make: () => ({ kind: "done" }) },
     { pattern: /您想刪除其他重複登入的連線嗎/, make: () => send("keep-other-session", "n\r") },
     { pattern: /您要刪除以上錯誤嘗試的記錄嗎/, make: () => send("clear-failed-attempts", "y\r") },
     { pattern: /登入太頻繁/, make: () => send("login-too-frequent", " ") },
-    // The user's own draft is never answered: any key here could save it to a slot or discard it.
-    { pattern: /請選擇暫存檔/, make: () => draftError },
-    { pattern: /有一篇文章尚未完成/, make: () => draftError },
     { pattern: /任意鍵/, make: () => send("any-key", " ") },
     {
       pattern: /請輸入代號/,

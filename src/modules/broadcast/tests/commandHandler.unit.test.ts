@@ -621,10 +621,54 @@ describe("bind flow", () => {
     expect(redisStore.has("mail:pending:123")).toBe(false);
   });
 
-  it("a command clears the pending state and runs normally", async () => {
+  it.each(["熱門CANARYpw9", "新增CANARYpw9", "清單", "幫助", "綁定PTT"])(
+    "the password step consumes %j as the password, never as a command",
+    async (password) => {
+      await toPasswordStep();
+      const deleteInputMessage = jest.fn().mockResolvedValue(undefined);
+      const result = await handlePending(buildCtx({ text: password, deleteInputMessage }));
+
+      expect(result?.reply).toContain("驗證中");
+      expect(result?.reply).not.toContain(password);
+      expect(deleteInputMessage).toHaveBeenCalledTimes(1);
+      expect(mockEnqueueVerifyJob).toHaveBeenCalledTimes(1);
+      const job = mockEnqueueVerifyJob.mock.calls[0][0];
+      expect(decryptSecret(job.passwordEnc, mockConfig.mail.encryptKey)).toBe(password);
+      expect(JSON.stringify(job)).not.toContain(password);
+      expect(mockCountByBoard).not.toHaveBeenCalled();
+      expect(mockAddSubscription).not.toHaveBeenCalled();
+      expect(redisStore.has("mail:pending:123")).toBe(false);
+    },
+  );
+
+  it("the ID step consumes command words as invalid IDs and keeps waiting", async () => {
     await executeBindStart(buildCtx());
     const result = await handlePending(buildCtx({ text: "幫助" }));
-    expect(result).toBeNull();
+    expect(result?.reply).toContain("格式不正確");
+    expect(JSON.parse(redisStore.get("mail:pending:123") as string).step).toBe("bindId");
+  });
+
+  it("取消 abandons the bind at the ID step only", async () => {
+    await executeBindStart(buildCtx());
+    const result = await handlePending(buildCtx({ text: "取消" }));
+    expect(result?.reply).toContain("取消");
+    expect(redisStore.has("mail:pending:123")).toBe(false);
+
+    await toPasswordStep();
+    const deleteInputMessage = jest.fn().mockResolvedValue(undefined);
+    await handlePending(buildCtx({ text: "取消", deleteInputMessage }));
+    expect(mockEnqueueVerifyJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("the password prompt says that waiting cancels", async () => {
+    await executeBindStart(buildCtx());
+    const result = await handlePending(buildCtx({ text: "myPttId" }));
+    expect(result?.reply).toContain("5 分鐘");
+  });
+
+  it("a reply-text wait is still cleared by a command, which then runs normally", async () => {
+    redisStore.set("mail:pending:123", JSON.stringify({ step: "replyText", subscriptionId: "x" }));
+    expect(await handlePending(buildCtx({ text: "幫助" }))).toBeNull();
     expect(redisStore.has("mail:pending:123")).toBe(false);
   });
 

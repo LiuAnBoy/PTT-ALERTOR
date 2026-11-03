@@ -130,6 +130,19 @@ describe("mailRequestRepository (real Postgres)", () => {
     expect(row?.status).toBe("FAILED");
   });
 
+  it("concurrent offers for one article under two keywords both resolve to one row", async () => {
+    const u = await user();
+    const articleCode = `M.${randomUUID()}`;
+    const base = { userId: u.id, board: "Test", articleCode, author: "seller", title: "t" };
+    const rows = await Promise.all([
+      upsertOffer({ ...base, keyword: "a" }),
+      upsertOffer({ ...base, keyword: "b" }),
+      upsertOffer({ ...base, keyword: "a" }),
+    ]);
+    expect(new Set(rows.map((r) => r.id)).size).toBe(1);
+    expect(await prisma.mailRequest.count({ where: { userId: u.id, articleCode } })).toBe(1);
+  });
+
   it("upsertOffer never overwrites a row past OFFERED", async () => {
     const u = await user();
     const req = await offer(u.id);
