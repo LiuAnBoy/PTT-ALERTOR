@@ -1,21 +1,31 @@
 import https from "node:https";
 
-import { Bot, type Context, webhookCallback } from "grammy";
+import { Bot, type Context, InlineKeyboard, webhookCallback } from "grammy";
 
 import { config } from "../../../core/config";
 import { createLogger } from "../../../core/logger";
 import { clearErrors, getRecentErrors } from "../../user/services/errorLogger";
 import {
   executeAdd,
+  executeBindStart,
   executeBoardStats,
   executeDelete,
   executeHelp,
   executeList,
   executeStart,
+  executeSubAction,
+  executeUnbind,
+  handlePending,
   parseCommand,
 } from "../commandHandler";
 import { registerAdapter } from "../registry";
-import type { CommandContext, NotificationPayload, PlatformAdapter } from "../types";
+import type {
+  ButtonRows,
+  CommandContext,
+  CommandResult,
+  NotificationPayload,
+  PlatformAdapter,
+} from "../types";
 
 /** Subset of CrawlerLog fields used in the error report formatter. */
 interface ErrorLogEntry {
@@ -52,9 +62,12 @@ export function getBot(): Bot {
     bot.command("start", handleStart);
     bot.command("errors", handleErrors);
     bot.on("message:text", handleText);
+    bot.on("callback_query:data", handleCallbackQuery);
 
+    // Log only the update id and the error name: the error text and the update may carry
+    // message text (a PTT password included).
     bot.catch((err) => {
-      logger.error(`Bot error: ${err.message}`);
+      logger.error(`Bot error on update ${err.ctx.update.update_id}: ${errorName(err.error)}`);
     });
   }
   return bot;
@@ -66,7 +79,23 @@ export function getBot(): Bot {
  * Get the Express middleware handler for Telegram webhook.
  */
 export function getWebhookHandler() {
-  return webhookCallback(getBot(), "express", { secretToken: undefined });
+  return webhookCallback(getBot(), "express", { secretToken: webhookSecret() });
+}
+
+/**
+ * The configured webhook secret.
+ * @returns The secret, or undefined when none is set (Telegram then sends no header).
+ */
+function webhookSecret(): string | undefined {
+  return config.telegram.webhookSecret || undefined;
+}
+
+/**
+ * Name of an unknown thrown value, without its message.
+ * @param error - The thrown value.
+ */
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
 }
 
 /**
@@ -82,7 +111,7 @@ export function getWebhookPath(): string {
 export async function startBot(): Promise<void> {
   const fullUrl = `${config.telegram.webhookUrl}${WEBHOOK_PATH}`;
   try {
-    await getBot().api.setWebhook(fullUrl, { secret_token: undefined });
+    await getBot().api.setWebhook(fullUrl, { secret_token: webhookSecret() });
     logger.info(`Telegram webhook set: ${fullUrl}`);
   } catch (error) {
     logger.error(`Failed to set Telegram webhook: ${error}`);
@@ -114,7 +143,36 @@ function toCommandContext(ctx: Context): CommandContext | null {
     displayName: [first_name, last_name].filter(Boolean).join(" ") || undefined,
     rawData: { id, first_name, last_name, username, language_code, is_premium, is_bot },
     text: ctx.message?.text?.trim() ?? "",
+    isPrivate: ctx.chat?.type === "private",
+    deleteInputMessage: async () => {
+      await ctx.deleteMessage();
+    },
   };
+}
+
+/**
+ * Map platform-agnostic buttons to a Telegram inline keyboard.
+ * @param buttons - Rows of buttons, if any.
+ * @returns The keyboard, or undefined when there are no buttons.
+ */
+function toKeyboard(buttons?: ButtonRows): InlineKeyboard | undefined {
+  if (!buttons || buttons.length === 0) return undefined;
+  const keyboard = new InlineKeyboard();
+  buttons.forEach((row, index) => {
+    if (index > 0) keyboard.row();
+    for (const button of row) keyboard.text(button.text, button.action);
+  });
+  return keyboard;
+}
+
+/**
+ * Send a command result as a reply, with its buttons as an inline keyboard.
+ * @param ctx - The Grammy context.
+ * @param result - The result to send.
+ */
+async function replyWith(ctx: Context, result: CommandResult): Promise<void> {
+  const keyboard = toKeyboard(result.buttons);
+  await (keyboard ? ctx.reply(result.reply, { reply_markup: keyboard }) : ctx.reply(result.reply));
 }
 
 /**
@@ -129,10 +187,18 @@ async function handleStart(ctx: Context) {
 
 /**
  * Route incoming text messages to the shared command handler.
+ * A pending multi-step input (bind ID, password, reply text) is consumed before parsing.
+ * @internal Exported for unit testing only.
  */
-async function handleText(ctx: Context) {
+export async function handleText(ctx: Context) {
   const cmdCtx = toCommandContext(ctx);
   if (!cmdCtx || !cmdCtx.text) return;
+
+  const pending = await handlePending(cmdCtx);
+  if (pending) {
+    await replyWith(ctx, pending);
+    return;
+  }
 
   const parsed = parseCommand(cmdCtx.text);
   if (!parsed) {
@@ -157,11 +223,62 @@ async function handleText(ctx: Context) {
     case "boardStats":
       result = await executeBoardStats(parsed.args);
       break;
+    case "bindPtt":
+      result = await executeBindStart(cmdCtx);
+      break;
+    case "unbindPtt":
+      result = await executeUnbind(cmdCtx);
+      break;
     default:
       return;
   }
 
-  await ctx.reply(result.reply);
+  await replyWith(ctx, result);
+}
+
+/**
+ * Route inline-button presses by callback-data prefix. `sub:` is the reply-settings card;
+ * further prefixes (`mail:`) are routed here too. Always answers the callback query.
+ * @internal Exported for unit testing only.
+ */
+export async function handleCallbackQuery(ctx: Context) {
+  const data = ctx.callbackQuery?.data ?? "";
+  let toast: string | undefined;
+  try {
+    if (data.startsWith("sub:")) {
+      toast = await handleSubCallback(ctx, data);
+    }
+  } catch (err) {
+    logger.error(`Callback failed: ${errorName(err)}`);
+    toast = "發生錯誤，請稍後再試";
+  } finally {
+    await ctx.answerCallbackQuery(toast ? { text: toast } : undefined).catch(() => undefined);
+  }
+}
+
+/**
+ * Run a `sub:<id>:<action>` press for the user who pressed it.
+ * @param ctx - The Grammy context of the callback query.
+ * @param data - The callback data.
+ * @returns A toast text for the press, if any.
+ */
+async function handleSubCallback(ctx: Context, data: string): Promise<string | undefined> {
+  const [, subscriptionId, action] = data.split(":");
+  const cmdCtx = toCommandContext(ctx);
+  if (!cmdCtx || !subscriptionId || !action) return "無法辨識的操作";
+
+  const result = await executeSubAction(cmdCtx, subscriptionId, action);
+  const keyboard = toKeyboard(result.buttons);
+  if (result.edit) {
+    try {
+      await ctx.editMessageText(result.reply, keyboard ? { reply_markup: keyboard } : undefined);
+      return result.toast;
+    } catch {
+      // Unchanged text or a message too old to edit: fall through and send a new message.
+    }
+  }
+  await replyWith(ctx, result);
+  return result.toast;
 }
 
 /**

@@ -21,6 +21,7 @@ export function createMockRedis() {
     srem: jest.fn().mockResolvedValue(1),
     scard: jest.fn().mockResolvedValue(0),
     sismember: jest.fn().mockResolvedValue(0),
+    get: jest.fn().mockResolvedValue(null),
     set: jest.fn().mockResolvedValue("OK"),
     zcard: jest.fn().mockResolvedValue(0),
     zadd: jest.fn().mockResolvedValue(1),

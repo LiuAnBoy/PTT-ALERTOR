@@ -6,11 +6,17 @@
 
 import {
   executeAdd,
+  executeBindStart,
   executeBoardStats,
   executeDelete,
   executeList,
   executeStart,
+  executeSubAction,
+  executeUnbind,
+  handlePending,
   parseCommand,
+  PASSWORD_DELETE_WARNING,
+  PTT_DISCLAIMER,
 } from "../commandHandler";
 import type { CommandContext } from "../types";
 
@@ -27,13 +33,57 @@ const mockResolveBoard = jest.fn();
 const mockAddToRedis = jest.fn();
 const mockRemoveFromRedis = jest.fn();
 const mockCountByBoard = jest.fn();
+const mockGetSubscriptionById = jest.fn();
+const mockSetReplyContent = jest.fn();
+const mockSetReplyIncludeOriginal = jest.fn();
+const mockDeletePttAccount = jest.fn();
+const mockEnqueueVerifyJob = jest.fn();
+const mockTerminal = jest.fn();
+const mockConfig = {
+  mail: { enabled: true, encryptKey: Buffer.alloc(32, 7).toString("base64"), dailyLimit: 20 },
+};
+/** In-memory stand-in for the Redis string commands the pending state uses. */
+const redisStore = new Map<string, string>();
+const mockLogger = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+
+jest.mock("../../../core/config", () => ({
+  config: {
+    get mail() {
+      return mockConfig.mail;
+    },
+  },
+}));
+
+jest.mock("../../../core/redis", () => ({
+  redis: {
+    get: async (k: string) => redisStore.get(k) ?? null,
+    set: async (k: string, v: string) => {
+      redisStore.set(k, v);
+      return "OK";
+    },
+    del: async (k: string) => (redisStore.delete(k) ? 1 : 0),
+  },
+}));
+
+jest.mock("../../mail/repositories/pttAccountRepository", () => ({
+  deletePttAccount: (...args: any[]) => mockDeletePttAccount(...args),
+}));
+
+jest.mock("../../mail/services/mailService", () => ({
+  enqueueVerifyJob: (...args: any[]) => mockEnqueueVerifyJob(...args),
+}));
+
+jest.mock("../../mail/services/pttTerminal", () => ({
+  sendPttMail: (...args: any[]) => mockTerminal(...args),
+  verifyPttLogin: (...args: any[]) => mockTerminal(...args),
+}));
 
 jest.mock("../../../core/logger", () => ({
   createLogger: () => ({
-    debug: jest.fn(),
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
+    debug: (...a: any[]) => mockLogger.debug(...a),
+    info: (...a: any[]) => mockLogger.info(...a),
+    warn: (...a: any[]) => mockLogger.warn(...a),
+    error: (...a: any[]) => mockLogger.error(...a),
   }),
 }));
 
@@ -52,6 +102,9 @@ jest.mock("../../user/repositories/subscriptionRepository", () => ({
   addSubscription: (...args: any[]) => mockAddSubscription(...args),
   deleteSubscription: (...args: any[]) => mockDeleteSubscription(...args),
   countByBoard: (...args: any[]) => mockCountByBoard(...args),
+  getSubscriptionById: (...args: any[]) => mockGetSubscriptionById(...args),
+  setReplyContent: (...args: any[]) => mockSetReplyContent(...args),
+  setReplyIncludeOriginal: (...args: any[]) => mockSetReplyIncludeOriginal(...args),
 }));
 
 jest.mock("../../user/services/boardValidator", () => ({
@@ -79,6 +132,7 @@ function buildCtx(overrides: Partial<CommandContext> = {}): CommandContext {
     displayName: "Test User",
     rawData: { id: 123, first_name: "Test", last_name: "User", username: "testuser" },
     text: "",
+    isPrivate: true,
     ...overrides,
   };
 }
@@ -407,5 +461,268 @@ describe("executeDelete", () => {
     const result = await executeDelete(buildCtx(), "Gossiping 問卦");
 
     expect(result.reply).toContain("尚未訂閱");
+  });
+});
+
+// ─── PTT mail: binding, settings, pending input ────────────────────────────
+
+const PASSWORD = "S3cretPw";
+const OWNER = { user: { id: "user-1" } };
+
+function buildSub(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "sub-1",
+    userId: "user-1",
+    board: "Gamesale",
+    keyword: "ps5",
+    replyContent: null,
+    replyIncludeOriginal: false,
+    ...overrides,
+  };
+}
+
+function allLoggedText(): string {
+  return JSON.stringify(
+    [mockLogger.debug, mockLogger.info, mockLogger.warn, mockLogger.error].map((f) => f.mock.calls),
+  );
+}
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  redisStore.clear();
+  mockConfig.mail.enabled = true;
+  mockFindChannel.mockResolvedValue(OWNER);
+});
+
+describe("parseCommand (mail)", () => {
+  it("parses 綁定PTT and 解除PTT", () => {
+    expect(parseCommand("綁定PTT")).toEqual({ command: "bindPtt", args: "" });
+    expect(parseCommand("解除ptt")).toEqual({ command: "unbindPtt", args: "" });
+  });
+});
+
+describe("executeBindStart", () => {
+  it("answers feature-off and stores nothing when mail is disabled", async () => {
+    mockConfig.mail.enabled = false;
+    const result = await executeBindStart(buildCtx());
+    expect(result.reply).toContain("未啟用");
+    expect(redisStore.size).toBe(0);
+  });
+
+  it("refuses outside a private chat and stores nothing", async () => {
+    const result = await executeBindStart(buildCtx({ isPrivate: false }));
+    expect(result.reply).toContain("私訊");
+    expect(redisStore.size).toBe(0);
+  });
+
+  it("shows the disclaimer, asks for the ID and sets pending state", async () => {
+    const result = await executeBindStart(buildCtx());
+    expect(result.reply).toContain(PTT_DISCLAIMER);
+    expect(result.reply).toContain("AES-256-GCM");
+    expect(JSON.parse(redisStore.get("mail:pending:123") as string)).toEqual({ step: "bindId" });
+  });
+});
+
+describe("bind flow", () => {
+  async function toPasswordStep() {
+    await executeBindStart(buildCtx());
+    await handlePending(buildCtx({ text: "myPttId" }));
+  }
+
+  it.each(["guest", "NEW", "1abc", "a", "abcdefghijklm", "ab cd"])(
+    "rejects the PTT id %s and keeps waiting for an id",
+    async (id) => {
+      await executeBindStart(buildCtx());
+      const result = await handlePending(buildCtx({ text: id }));
+      expect(result?.reply).toContain("格式不正確");
+      expect(JSON.parse(redisStore.get("mail:pending:123") as string).step).toBe("bindId");
+    },
+  );
+
+  it("accepts a valid id and moves to the password step", async () => {
+    await toPasswordStep();
+    expect(JSON.parse(redisStore.get("mail:pending:123") as string)).toEqual({
+      step: "bindPassword",
+      pttId: "myPttId",
+    });
+  });
+
+  it("deletes the password message, enqueues ciphertext only and never calls the terminal", async () => {
+    await toPasswordStep();
+    const deleteInputMessage = jest.fn().mockResolvedValue(undefined);
+    const result = await handlePending(buildCtx({ text: PASSWORD, deleteInputMessage }));
+
+    expect(deleteInputMessage).toHaveBeenCalledTimes(1);
+    expect(result?.reply).toContain("驗證中");
+    expect(result?.reply).not.toContain(PASSWORD);
+    expect(mockEnqueueVerifyJob).toHaveBeenCalledTimes(1);
+    const job = mockEnqueueVerifyJob.mock.calls[0][0];
+    expect(job).toEqual({
+      userId: "user-1",
+      chatId: "123",
+      pttId: "myPttId",
+      passwordEnc: expect.stringMatching(/^v1\./),
+    });
+    expect(JSON.stringify(job)).not.toContain(PASSWORD);
+    expect(mockTerminal).not.toHaveBeenCalled();
+    expect(redisStore.has("mail:pending:123")).toBe(false);
+  });
+
+  it("warns the user to delete the message when deletion fails", async () => {
+    await toPasswordStep();
+    const deleteInputMessage = jest.fn().mockRejectedValue(new Error("forbidden"));
+    const result = await handlePending(buildCtx({ text: PASSWORD, deleteInputMessage }));
+
+    expect(result?.reply).toContain(PASSWORD_DELETE_WARNING);
+    expect(mockEnqueueVerifyJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("never lets the password reach a logger, even when queueing fails", async () => {
+    await toPasswordStep();
+    mockEnqueueVerifyJob.mockRejectedValueOnce(new Error(`queue down ${PASSWORD}`));
+    const result = await handlePending(
+      buildCtx({ text: PASSWORD, deleteInputMessage: jest.fn().mockResolvedValue(undefined) }),
+    );
+
+    expect(result?.reply).toContain("伺服器錯誤");
+    expect(allLoggedText()).not.toContain(PASSWORD);
+  });
+
+  it("a command clears the pending state and runs normally", async () => {
+    await executeBindStart(buildCtx());
+    const result = await handlePending(buildCtx({ text: "幫助" }));
+    expect(result).toBeNull();
+    expect(redisStore.has("mail:pending:123")).toBe(false);
+  });
+
+  it("returns null when nothing is pending", async () => {
+    expect(await handlePending(buildCtx({ text: "hello" }))).toBeNull();
+  });
+});
+
+describe("executeUnbind", () => {
+  it("deletes the account and confirms", async () => {
+    mockDeletePttAccount.mockResolvedValue(true);
+    const result = await executeUnbind(buildCtx());
+    expect(mockDeletePttAccount).toHaveBeenCalledWith("user-1");
+    expect(result.reply).toContain("已刪除");
+  });
+
+  it("says so when no account was bound", async () => {
+    mockDeletePttAccount.mockResolvedValue(false);
+    const result = await executeUnbind(buildCtx());
+    expect(result.reply).toContain("沒有綁定");
+  });
+});
+
+describe("settings card actions", () => {
+  it("open shows board, keyword, 未設定 and the buttons", async () => {
+    mockGetSubscriptionById.mockResolvedValue(buildSub());
+    const result = await executeSubAction(buildCtx(), "sub-1", "open");
+    expect(result.reply).toContain("Gamesale");
+    expect(result.reply).toContain("ps5");
+    expect(result.reply).toContain("未設定");
+    expect(result.buttons?.flat().map((b) => b.action)).toEqual([
+      "sub:sub-1:reply",
+      "sub:sub-1:orig",
+      "sub:sub-1:clear",
+    ]);
+    expect(result.edit).toBe(false);
+  });
+
+  it("reply sets pending state, and the next text saves it and shows the card", async () => {
+    mockGetSubscriptionById.mockResolvedValue(buildSub());
+    await executeSubAction(buildCtx(), "sub-1", "reply");
+    expect(JSON.parse(redisStore.get("mail:pending:123") as string)).toEqual({
+      step: "replyText",
+      subscriptionId: "sub-1",
+    });
+
+    mockSetReplyContent.mockResolvedValue(buildSub({ replyContent: "你好，請問還在嗎" }));
+    const result = await handlePending(buildCtx({ text: "你好，請問還在嗎" }));
+    expect(mockSetReplyContent).toHaveBeenCalledWith("sub-1", "你好，請問還在嗎");
+    expect(result?.reply).toContain("你好，請問還在嗎");
+    expect(redisStore.has("mail:pending:123")).toBe(false);
+  });
+
+  it("caps the reply length and keeps waiting", async () => {
+    mockGetSubscriptionById.mockResolvedValue(buildSub());
+    await executeSubAction(buildCtx(), "sub-1", "reply");
+    const result = await handlePending(buildCtx({ text: "a".repeat(2001) }));
+    expect(result?.reply).toContain("太長");
+    expect(mockSetReplyContent).not.toHaveBeenCalled();
+    expect(redisStore.has("mail:pending:123")).toBe(true);
+  });
+
+  it("orig toggles the flag", async () => {
+    mockGetSubscriptionById.mockResolvedValue(buildSub());
+    mockSetReplyIncludeOriginal.mockResolvedValue(buildSub({ replyIncludeOriginal: true }));
+    const result = await executeSubAction(buildCtx(), "sub-1", "orig");
+    expect(mockSetReplyIncludeOriginal).toHaveBeenCalledWith("sub-1", true);
+    expect(result.reply).toContain("附原文：開");
+  });
+
+  it("clear removes the reply text", async () => {
+    mockGetSubscriptionById.mockResolvedValue(buildSub({ replyContent: "hi" }));
+    mockSetReplyContent.mockResolvedValue(buildSub());
+    const result = await executeSubAction(buildCtx(), "sub-1", "clear");
+    expect(mockSetReplyContent).toHaveBeenCalledWith("sub-1", null);
+    expect(result.reply).toContain("未設定");
+  });
+
+  it.each(["open", "reply", "orig", "clear"])(
+    "refuses %s on another user's subscription",
+    async (action) => {
+      mockGetSubscriptionById.mockResolvedValue(buildSub({ userId: "someone-else" }));
+      const result = await executeSubAction(buildCtx(), "sub-1", action);
+      expect(result.reply).toContain("找不到");
+      expect(mockSetReplyContent).not.toHaveBeenCalled();
+      expect(mockSetReplyIncludeOriginal).not.toHaveBeenCalled();
+      expect(redisStore.size).toBe(0);
+    },
+  );
+
+  it("refuses a saved reply text when the pending subscription is not the user's", async () => {
+    redisStore.set("mail:pending:123", JSON.stringify({ step: "replyText", subscriptionId: "x" }));
+    mockGetSubscriptionById.mockResolvedValue(buildSub({ userId: "someone-else" }));
+    const result = await handlePending(buildCtx({ text: "hello" }));
+    expect(result?.reply).toContain("找不到");
+    expect(mockSetReplyContent).not.toHaveBeenCalled();
+  });
+
+  it("answers feature-off when mail is disabled", async () => {
+    mockConfig.mail.enabled = false;
+    const result = await executeSubAction(buildCtx(), "sub-1", "orig");
+    expect(result.reply).toContain("未啟用");
+    expect(mockGetSubscriptionById).not.toHaveBeenCalled();
+  });
+});
+
+describe("buttons on 新增 and 清單", () => {
+  it("新增 success returns the card buttons of the new subscription", async () => {
+    mockResolveBoard.mockResolvedValue("Gamesale");
+    mockSubscriptionExists.mockResolvedValue(false);
+    mockAddSubscription.mockResolvedValue(buildSub({ id: "new-sub" }));
+    const result = await executeAdd(buildCtx(), "Gamesale ps5");
+    expect(result.buttons?.flat().map((b) => b.action)).toContain("sub:new-sub:reply");
+  });
+
+  it("清單 keeps the grouped text and adds one open button per subscription", async () => {
+    mockGetSubscriptions.mockResolvedValue([
+      buildSub(),
+      buildSub({ id: "sub-2", keyword: "switch" }),
+    ]);
+    const result = await executeList(buildCtx());
+    expect(result.reply).toContain("📌 Gamesale");
+    expect(result.buttons?.map((row) => row[0]!.action)).toEqual([
+      "sub:sub-1:open",
+      "sub:sub-2:open",
+    ]);
+  });
+
+  it("offers no buttons when mail is disabled", async () => {
+    mockConfig.mail.enabled = false;
+    mockGetSubscriptions.mockResolvedValue([buildSub()]);
+    expect((await executeList(buildCtx())).buttons).toBeUndefined();
   });
 });

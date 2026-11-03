@@ -17,7 +17,20 @@ export interface CommandContext {
   rawData?: Record<string, unknown>;
   /** The raw text message from the user */
   text: string;
+  /** True when the message came from a one-to-one chat (never set for groups or channels) */
+  isPrivate?: boolean;
+  /** Deletes the user's incoming message; rejects when the platform refuses */
+  deleteInputMessage?: () => Promise<void>;
 }
+
+/** One action button; `action` is the callback payload (at most 64 bytes). */
+export interface ActionButton {
+  text: string;
+  action: string;
+}
+
+/** Rows of action buttons shown under a message. */
+export type ButtonRows = ActionButton[][];
 
 /**
  * Result of a command handler.
@@ -26,6 +39,8 @@ export interface CommandContext {
 export interface CommandResult {
   /** The reply text to send back to the user */
   reply: string;
+  /** Optional action buttons shown under the reply */
+  buttons?: ButtonRows;
 }
 
 /**
@@ -80,7 +95,7 @@ export interface PlatformAdapter {
   updateMessage?(
     target: { chatId: string; messageId: string },
     text: string,
-    buttons?: { text: string; action: string }[][],
+    buttons?: ButtonRows,
   ): Promise<void>;
 
   /** Rate limit config for the notification worker */
