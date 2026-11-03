@@ -176,6 +176,10 @@ defaultJobOptions: {
 - dispatchCrawlerJobs 呼叫 `sendProgressAlert()`（每 30 分鐘最多一則進度告警，非每輪洗版）
 - 不會完全停止排程，只是 worker 端 skip
 
+**每輪計數規則**（`src/core/roundTracker.ts`）：一個看板每輪只貢獻一個結果，以第一個記錄到的為準，同看板後續的記錄一律忽略；整輪結果也只會回報給 circuit breaker 一次。這是必要的，因為同一個 crawl job 會多次進入 worker——BullMQ 會重試，而熔斷後重試又會走 skip 分支——否則失敗數會超過看板總數（log 出現 `Round N complete: 6/3 failed`），並且每多記一次就重複觸發一次 `recordRoundResult`。
+
+已知限制：上一輪的重試有可能在下一輪 `startRound` 之後才落地，佔掉該看板的名額。重試會在 1 分鐘的 dispatch 間隔內跑完，因此極少發生，且下一輪就會自行修正。
+
 實作於 `src/core/circuitBreaker.ts`（singleton `crawlerCircuit`）和 `src/core/roundTracker.ts`（追蹤每輪成功/失敗數）。
 
 ## BullMQ Failed Job Cleanup

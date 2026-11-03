@@ -20,7 +20,7 @@ export const crawlerWorker = new Worker(
 
     if (roundTracker.isCircuitOpen()) {
       logger.warn(`Job ${job.id}: circuit OPEN, skipping ${boardName}`);
-      roundTracker.recordFailure();
+      roundTracker.recordFailure(boardName);
       return;
     }
 
@@ -29,9 +29,9 @@ export const crawlerWorker = new Worker(
     try {
       const articles = await fetchNewArticles(boardName);
       logger.info(`Job ${job.id}: found ${articles.length} new articles from ${boardName}`);
-      roundTracker.recordSuccess();
+      roundTracker.recordSuccess(boardName);
     } catch (err) {
-      roundTracker.recordFailure();
+      roundTracker.recordFailure(boardName);
       throw err;
     }
   },
