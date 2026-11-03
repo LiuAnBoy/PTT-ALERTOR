@@ -71,6 +71,18 @@ export interface PlatformAdapter {
    */
   sendAlert(chatId: string, text: string): Promise<void>;
 
+  /**
+   * Edit a message this bot sent earlier (optional; callers fall back to `sendReply`).
+   * @param target - The chat and message to edit.
+   * @param text - The new message text.
+   * @param buttons - Rows of action buttons to show; omitted removes any keyboard.
+   */
+  updateMessage?(
+    target: { chatId: string; messageId: string },
+    text: string,
+    buttons?: { text: string; action: string }[][],
+  ): Promise<void>;
+
   /** Rate limit config for the notification worker */
   readonly rateLimit: { max: number; duration: number };
 }
