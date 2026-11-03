@@ -245,11 +245,14 @@ async function enqueueSend(request: MailRequest): Promise<void> {
  * the send job after the claim has committed.
  * @param requestId - The MailRequest id from the button.
  * @param presserUserId - The user who pressed it (already resolved from the platform user).
+ * @param tappedMessage - The message the button sits on; stored on the request before the send
+ *   job is enqueued when the request has no message on record, so the result can be reported.
  * @returns `queued` when this tap won the claim, else the reason it was refused.
  */
 export async function requestMail(
   requestId: string,
   presserUserId: string,
+  tappedMessage?: MessageRef,
 ): Promise<RequestMailOutcome> {
   if (!config.mail.enabled) return { kind: "disabled" };
 
@@ -264,6 +267,19 @@ export async function requestMail(
     new Date(),
   );
   if (result.kind !== "claimed") return result;
+
+  if (tappedMessage && (!result.request.chatId || !result.request.messageId)) {
+    try {
+      await recordNotificationMessage(requestId, tappedMessage);
+      result.request = {
+        ...result.request,
+        chatId: tappedMessage.chatId,
+        messageId: tappedMessage.messageId,
+      };
+    } catch (err) {
+      logger.warn(`Could not store the tapped message: ${(err as Error).message}`);
+    }
+  }
 
   try {
     await enqueueSend(result.request);
@@ -381,14 +397,18 @@ async function startSend(requestId: string): Promise<MailRequest | null> {
   } catch (err) {
     logger.error(`Send job ${requestId} could not be failed: ${(err as Error).message}`);
   }
-  if (request) {
-    const canRetry = marked && request.attempts < MAX_MAIL_ATTEMPTS;
-    await report(
-      request,
-      canRetry ? MAIL_TEXT.failedRetry(FAIL_REASON.generic) : MAIL_TEXT.failed(FAIL_REASON.generic),
-      canRetry ? [[{ text: "✉️ 再試一次", action: `mail:${requestId}` }]] : undefined,
-    );
+  // Tell the user only when the row really moved to FAILED. A row that stayed QUEUED is left
+  // for recoverInFlight, and a stale job that finds another status has nothing to report.
+  if (!marked || !request) {
+    logger.warn(`Send job ${requestId} left as is: the row was not moved to FAILED`);
+    return null;
   }
+  const canRetry = request.attempts < MAX_MAIL_ATTEMPTS;
+  await report(
+    request,
+    canRetry ? MAIL_TEXT.failedRetry(FAIL_REASON.generic) : MAIL_TEXT.failed(FAIL_REASON.generic),
+    canRetry ? [[{ text: "✉️ 再試一次", action: `mail:${requestId}` }]] : undefined,
+  );
   return null;
 }
 

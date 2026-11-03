@@ -4,12 +4,7 @@ import { Bot, type Context, InlineKeyboard, webhookCallback } from "grammy";
 
 import { config } from "../../../core/config";
 import { createLogger } from "../../../core/logger";
-import {
-  describeRequestOutcome,
-  MAIL_TEXT,
-  recordNotificationMessage,
-  requestMail,
-} from "../../mail/services/mailService";
+import { describeRequestOutcome, MAIL_TEXT, requestMail } from "../../mail/services/mailService";
 import { clearErrors, getRecentErrors } from "../../user/services/errorLogger";
 import {
   executeAdd,
@@ -296,27 +291,20 @@ async function handleMailCallback(ctx: Context, data: string): Promise<CallbackA
   const user = await getUser(cmdCtx);
   if (!user) return { text: "請先輸入 /start 來開始使用。", alert: true };
 
-  const outcome = await requestMail(requestId, user.id);
+  // The tapped message is stored by requestMail, before the send job exists, when the request
+  // has none on record (the store at send time failed).
+  const tapped = ctx.callbackQuery?.message;
+  const outcome = await requestMail(
+    requestId,
+    user.id,
+    tapped ? { chatId: String(tapped.chat.id), messageId: String(tapped.message_id) } : undefined,
+  );
   if (outcome.kind !== "queued") {
     const alert =
       outcome.kind === "not_owner" ||
       outcome.kind === "cap_reached" ||
       outcome.kind === "attempts_exhausted";
     return { text: describeRequestOutcome(outcome), alert };
-  }
-
-  // A request with no message on record (the store at send time failed) adopts the tapped
-  // message, so the result can still be reported on it.
-  const tapped = ctx.callbackQuery?.message;
-  if (tapped && (!outcome.request.chatId || !outcome.request.messageId)) {
-    try {
-      await recordNotificationMessage(requestId, {
-        chatId: String(tapped.chat.id),
-        messageId: String(tapped.message_id),
-      });
-    } catch (err) {
-      logger.warn(`Could not store the tapped message: ${errorName(err)}`);
-    }
   }
 
   try {

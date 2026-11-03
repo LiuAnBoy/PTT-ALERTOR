@@ -81,13 +81,11 @@ jest.mock("../../user/services/errorLogger", () => ({
 }));
 
 const mockRequestMail = jest.fn();
-const mockRecordMessage = jest.fn();
 const mockGetUser = jest.fn();
 
 jest.mock("../../mail/services/mailService", () => ({
   MAIL_TEXT: { sending: "⏳ 寄送中…" },
   requestMail: (...a: any[]) => mockRequestMail(...a),
-  recordNotificationMessage: (...a: any[]) => mockRecordMessage(...a),
   describeRequestOutcome: (outcome: { kind: string }) => `refused:${outcome.kind}`,
 }));
 
@@ -431,7 +429,7 @@ describe("handleText and callbacks", () => {
     const ctx = createMockContext({ callbackData: "mail:req-1" });
     await handleCallbackQuery(ctx as any);
 
-    expect(mockRequestMail).toHaveBeenCalledWith("req-1", "intruder");
+    expect(mockRequestMail).toHaveBeenCalledWith("req-1", "intruder", undefined);
     expect(ctx.editMessageReplyMarkup).not.toHaveBeenCalled();
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
       text: "refused:not_owner",
@@ -469,43 +467,27 @@ describe("handleText and callbacks", () => {
     });
   });
 
-  it("mail tap: a request with no message on record adopts the tapped message", async () => {
+  it("mail tap: passes the tapped message to requestMail, which stores it before enqueueing", async () => {
     mockGetUser.mockResolvedValue({ id: "u1" });
-    mockRequestMail.mockResolvedValue({
-      kind: "queued",
-      request: { id: "req-1", chatId: null, messageId: null },
-    });
-    mockRecordMessage.mockResolvedValue(undefined);
+    mockRequestMail.mockResolvedValue({ kind: "queued", request: { id: "req-1" } });
     const ctx = createMockContext({
       callbackData: "mail:req-1",
       callbackMessage: { chat: { id: 555 }, message_id: 77 },
     });
     await handleCallbackQuery(ctx as any);
 
-    expect(mockRecordMessage).toHaveBeenCalledWith("req-1", { chatId: "555", messageId: "77" });
+    expect(mockRequestMail).toHaveBeenCalledWith("req-1", "u1", {
+      chatId: "555",
+      messageId: "77",
+    });
     expect(ctx.editMessageReplyMarkup).toHaveBeenCalledTimes(1);
   });
 
-  it("mail tap: a stored message is left alone, and a failed store does not break the tap", async () => {
+  it("mail tap: without a callback message requestMail gets no fallback ref", async () => {
     mockGetUser.mockResolvedValue({ id: "u1" });
-    const message = { chat: { id: 555 }, message_id: 77 };
-    mockRequestMail.mockResolvedValueOnce({
-      kind: "queued",
-      request: { id: "req-1", chatId: "555", messageId: "70" },
-    });
-    await handleCallbackQuery(
-      createMockContext({ callbackData: "mail:req-1", callbackMessage: message }) as any,
-    );
-    expect(mockRecordMessage).not.toHaveBeenCalled();
-
-    mockRequestMail.mockResolvedValueOnce({
-      kind: "queued",
-      request: { id: "req-1", chatId: null, messageId: null },
-    });
-    mockRecordMessage.mockRejectedValue(new Error("db down"));
-    const ctx = createMockContext({ callbackData: "mail:req-1", callbackMessage: message });
-    await handleCallbackQuery(ctx as any);
-    expect(ctx.editMessageReplyMarkup).toHaveBeenCalledTimes(1);
+    mockRequestMail.mockResolvedValue({ kind: "queued", request: { id: "req-1" } });
+    await handleCallbackQuery(createMockContext({ callbackData: "mail:req-1" }) as any);
+    expect(mockRequestMail).toHaveBeenCalledWith("req-1", "u1", undefined);
   });
 
   it("mail tap: cap and exhausted refusals are shown as alerts", async () => {

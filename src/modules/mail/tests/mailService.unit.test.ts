@@ -301,6 +301,36 @@ describe("requestMail", () => {
     expect(repo.claim).not.toHaveBeenCalled();
   });
 
+  it("stores the tapped message before the send job exists when the request has none", async () => {
+    repo.claim.mockResolvedValue({
+      kind: "claimed",
+      request: request({ chatId: null, messageId: null }),
+    });
+    const order: string[] = [];
+    repo.setMessageRef.mockImplementation(async () => void order.push("store"));
+    mockAdd.mockImplementation(async () => void order.push("enqueue"));
+    const ref = { chatId: "555", messageId: "77" };
+    const out = await requestMail("req-1", "user-1", ref);
+    expect(order).toEqual(["store", "enqueue"]);
+    expect(repo.setMessageRef).toHaveBeenCalledWith("req-1", "555", "77");
+    expect(out).toMatchObject({ kind: "queued", request: ref });
+  });
+
+  it("leaves a stored message alone and still enqueues when the store fails", async () => {
+    repo.claim.mockResolvedValue({ kind: "claimed", request: request() });
+    await requestMail("req-1", "user-1", { chatId: "555", messageId: "77" });
+    expect(repo.setMessageRef).not.toHaveBeenCalled();
+
+    repo.claim.mockResolvedValue({
+      kind: "claimed",
+      request: request({ chatId: null, messageId: null }),
+    });
+    repo.setMessageRef.mockRejectedValue(new Error("db down"));
+    const out = await requestMail("req-1", "user-1", { chatId: "555", messageId: "77" });
+    expect(out.kind).toBe("queued");
+    expect(mockAdd).toHaveBeenCalledTimes(2);
+  });
+
   it("fails the row when the queue is unreachable", async () => {
     repo.claim.mockResolvedValue({ kind: "claimed", request: request() });
     mockAdd.mockRejectedValue(new Error("redis down"));
@@ -430,6 +460,14 @@ describe("executeSendJob", () => {
     expect(mockSend).not.toHaveBeenCalled();
     expect(repo.markFailed).toHaveBeenCalledWith("req-1", expect.any(String));
     expect(mockAdapter.updateMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports nothing when markFailed did not move the row", async () => {
+    repo.markSending.mockRejectedValue(new Error("db down"));
+    repo.markFailed.mockResolvedValue(false);
+    await executeSendJob("req-1");
+    expect(mockAdapter.updateMessage).not.toHaveBeenCalled();
+    expect(mockAdapter.sendReply).not.toHaveBeenCalled();
   });
 
   it("gives up quietly when the database stays down", async () => {
