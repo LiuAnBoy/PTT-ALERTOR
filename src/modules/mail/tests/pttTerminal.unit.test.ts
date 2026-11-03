@@ -105,8 +105,6 @@ describe("decideLogin", () => {
     ["failed attempts log", "您要刪除以上錯誤嘗試的記錄嗎？", afterPw, "y\r"],
     ["too frequent", "登入太頻繁，請稍後再試", afterPw, " "],
     ["any key", "請按任意鍵繼續", afterPw, " "],
-    ["draft picker", "請選擇暫存檔 (0-9)", afterPw, "\r"],
-    ["unfinished article", "有一篇文章尚未完成，是否繼續？", afterPw, "Q\r"],
   ])("answers the %s prompt", (_name, screen, state, expected) => {
     expect(keys(screen, state)).toBe(expected);
   });
@@ -117,8 +115,19 @@ describe("decideLogin", () => {
     expect(d).toMatchObject({ kind: "send", next: { idSent: true, passwordSent: false } });
   });
 
-  it("finishes on the main menu", () => {
+  it("finishes on the main menu only after the password was sent", () => {
     expect(keys("【主功能表】 批踢踢實業坊", afterPw)).toBe("done");
+    expect(keys("【主功能表】 批踢踢實業坊", fresh)).toBe("wait");
+    expect(keys("(G)oodbye", afterId)).toBe("wait");
+  });
+
+  it.each([
+    ["draft picker", "請選擇暫存檔 (0-9)"],
+    ["unfinished article", "有一篇文章尚未完成，是否繼續？"],
+  ])("stops with UnfinishedDraft on the %s prompt and sends no key", (_name, screen) => {
+    const d = decideLogin(screen, afterPw, loginInput);
+    expect(d.kind).toBe("error");
+    expect((d as { error: PttError }).error.code).toBe("UnfinishedDraft");
   });
 
   it.each([
@@ -508,6 +517,52 @@ describe("sendPttMail lifecycle", () => {
     expect(transport.closeCalls).toBe(1);
     expect(transport.sent.map(latin)).not.toContain("\x1b[D");
   });
+});
+
+describe("reserved ids", () => {
+  const connect = jest.fn();
+  beforeEach(() => connect.mockClear());
+
+  it.each(["guest", "GUEST", "New", " new "])(
+    "sendPttMail refuses %j before connecting",
+    async (pttId) => {
+      const result = await sendPttMail(
+        { pttId, password: "pw", to: "bob", subject: "hi", body: "hello" },
+        { connect },
+      );
+      expect(result).toMatchObject({ outcome: "not_sent", errorCode: "WrongPassword" });
+      expect(connect).not.toHaveBeenCalled();
+    },
+  );
+
+  it("verifyPttLogin refuses guest before connecting", async () => {
+    await expect(verifyPttLogin("Guest", "pw", { connect })).rejects.toMatchObject({
+      code: "WrongPassword",
+    });
+    expect(connect).not.toHaveBeenCalled();
+  });
+});
+
+describe("unfinished draft", () => {
+  it.each(["有一篇文章尚未完成，是否繼續？", "請選擇暫存檔 (0-9)"])(
+    "sendPttMail closes without any key after the password for %s",
+    async (screen) => {
+      const transport = new FakeTransport(["請輸入您的密碼:", screen]);
+      const result = await sendPttMail(
+        { pttId: "alice", password: "pw", to: "bob", subject: "hi", body: "hello" },
+        {
+          ...OPTS,
+          connect: async () => {
+            setImmediate(() => transport.emit("請輸入代號:"));
+            return transport;
+          },
+        },
+      );
+      expect(result).toMatchObject({ outcome: "not_sent", errorCode: "UnfinishedDraft" });
+      expect(transport.sent.map(latin)).toEqual(["alice\r", "pw\r"]);
+      expect(transport.closeCalls).toBe(1);
+    },
+  );
 });
 
 describe("verifyPttLogin", () => {

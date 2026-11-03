@@ -3,6 +3,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 const VERSION = "v1";
 const IV_BYTES = 12;
 const KEY_BYTES = 32;
+const TAG_BYTES = 16;
 
 /**
  * Decode and validate a base64 AES-256 key.
@@ -50,8 +51,9 @@ export function decryptSecret(payload: string, keyB64: string): string {
   const iv = Buffer.from(parts[1]!, "base64");
   const tag = Buffer.from(parts[2]!, "base64");
   const ct = Buffer.from(parts[3]!, "base64");
-  if (iv.length !== IV_BYTES) throw new Error("Unsupported encrypted secret format");
-  const decipher = createDecipheriv("aes-256-gcm", key, iv);
+  if (iv.length !== IV_BYTES || tag.length !== TAG_BYTES)
+    throw new Error("Unsupported encrypted secret format");
+  const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
 }

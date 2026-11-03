@@ -6,7 +6,7 @@ import { createLogger } from "../../../core/logger";
 import { getArticleForMail } from "../../board/repositories/articleRepository";
 import { ARTICLE_DELETED, fetchDetail } from "../../board/services/detailFetcher";
 import { getAdapter } from "../../broadcast/registry";
-import type { ButtonRows, NotificationPayload } from "../../broadcast/types";
+import type { ButtonRows, MessageRef, NotificationPayload } from "../../broadcast/types";
 import { findSubscription } from "../../user/repositories/subscriptionRepository";
 import * as mailRequests from "../repositories/mailRequestRepository";
 import { MAX_MAIL_ATTEMPTS } from "../repositories/mailRequestRepository";
@@ -35,6 +35,7 @@ const FAIL_REASON = {
   timeout: "連線逾時",
   connect: "無法連線到 PTT",
   secure: "PTT 要求安全連線，無法登入",
+  draft: "這個 PTT 帳號有未完成的文章草稿，請先登入 PTT 一次，完成或放棄該草稿後再試",
   generic: "寄信失敗",
 } as const;
 
@@ -54,6 +55,7 @@ export const MAIL_TEXT = {
   verifyWrongPassword: `❌ PTT 登入失敗：帳號或密碼錯誤。${REBIND_HINT}`,
   verifyTwoFactor: `❌ ${FAIL_REASON.twoFactor}。`,
   verifyFailed: (reason: string) => `❌ 無法驗證 PTT 帳號：${reason}，請稍後再試。`,
+  verifyDraft: `❌ 無法驗證 PTT 帳號：${FAIL_REASON.draft}，再重新「綁定PTT」。`,
 } as const;
 
 /**
@@ -183,8 +185,9 @@ export async function checkEligibility(payload: NotificationPayload): Promise<El
  * Record an offer for a notification when it is eligible.
  * @param payload - The notification about to be sent.
  * @returns The MailRequest id (the button id), or null when no button should be shown: not
- *   eligible, or a request for this article already moved past OFFERED (or FAILED with
- *   attempts exhausted).
+ *   eligible, the article's request belongs to another keyword (one request serves one
+ *   article, so only the notification of the keyword it was made for gets the button), or the
+ *   request already moved past OFFERED (or FAILED with attempts exhausted).
  */
 export async function offerMail(payload: NotificationPayload): Promise<string | null> {
   const eligibility = await checkEligibility(payload);
@@ -197,9 +200,19 @@ export async function offerMail(payload: NotificationPayload): Promise<string | 
     title: payload.title,
     keyword: payload.keyword,
   });
+  if (row.keyword !== payload.keyword) return null;
   if (row.status === "OFFERED") return row.id;
   if (row.status === "FAILED" && row.attempts < MAX_MAIL_ATTEMPTS) return row.id;
   return null;
+}
+
+/**
+ * Remember the message that carries a request's button, so the result can be reported on it.
+ * @param requestId - The MailRequest id.
+ * @param ref - The message holding the button.
+ */
+export async function recordNotificationMessage(requestId: string, ref: MessageRef): Promise<void> {
+  await mailRequests.setMessageRef(requestId, ref.chatId, ref.messageId);
 }
 
 // ---------------------------------------------------------------------------
@@ -327,6 +340,8 @@ function reasonFor(code: PttError["code"] | undefined): string {
       return FAIL_REASON.connect;
     case "SecureConnectionRequired":
       return FAIL_REASON.secure;
+    case "UnfinishedDraft":
+      return FAIL_REASON.draft;
     default:
       return FAIL_REASON.generic;
   }
@@ -337,6 +352,47 @@ function reasonFor(code: PttError["code"] | undefined): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Load a request and move it QUEUED to SENDING. A database error here means nothing was sent:
+ * the row is marked FAILED when the database allows it and the user is told.
+ * @param requestId - The MailRequest id.
+ * @returns The request when this job may send it, else null (unknown, not QUEUED, or errored).
+ */
+async function startSend(requestId: string): Promise<MailRequest | null> {
+  let request: MailRequest | null = null;
+  try {
+    request = await mailRequests.getMailRequest(requestId);
+    if (!request) {
+      logger.warn(`Send job for unknown request ${requestId}`);
+      return null;
+    }
+    if (!(await mailRequests.markSending(requestId))) {
+      logger.warn(`Send job skipped: ${requestId} is ${request.status}, not QUEUED`);
+      return null;
+    }
+    return request;
+  } catch (err) {
+    logger.error(`Send job ${requestId} could not start: ${(err as Error).message}`);
+  }
+
+  let marked = false;
+  try {
+    marked = await mailRequests.markFailed(requestId, FAIL_REASON.generic);
+    request ??= await mailRequests.getMailRequest(requestId);
+  } catch (err) {
+    logger.error(`Send job ${requestId} could not be failed: ${(err as Error).message}`);
+  }
+  if (request) {
+    const canRetry = marked && request.attempts < MAX_MAIL_ATTEMPTS;
+    await report(
+      request,
+      canRetry ? MAIL_TEXT.failedRetry(FAIL_REASON.generic) : MAIL_TEXT.failed(FAIL_REASON.generic),
+      canRetry ? [[{ text: "✉️ 再試一次", action: `mail:${requestId}` }]] : undefined,
+    );
+  }
+  return null;
+}
+
+/**
  * Run a `send` job: QUEUED to SENDING, send the mail, then SENT, FAILED or UNKNOWN. The row
  * decides whether to act, so a repeated or stale job does nothing. Never mails twice for one
  * claim: only a certain not-sent outcome returns the row to FAILED. The plaintext password
@@ -344,15 +400,8 @@ function reasonFor(code: PttError["code"] | undefined): string {
  * @param requestId - The MailRequest id.
  */
 export async function executeSendJob(requestId: string): Promise<void> {
-  const request = await mailRequests.getMailRequest(requestId);
-  if (!request) {
-    logger.warn(`Send job for unknown request ${requestId}`);
-    return;
-  }
-  if (!(await mailRequests.markSending(requestId))) {
-    logger.warn(`Send job skipped: ${requestId} is ${request.status}, not QUEUED`);
-    return;
-  }
+  const request = await startSend(requestId);
+  if (!request) return;
 
   /** Finish as certainly-not-sent; the button returns while attempts remain. */
   const fail = async (reason: string, opts: { hint?: string; retry?: boolean } = {}) => {
@@ -456,6 +505,8 @@ export async function executeVerifyJob(data: VerifyJobData): Promise<void> {
       text = MAIL_TEXT.verifyWrongPassword;
     } else if (err instanceof PttError && err.code === "TwoFactorRequired") {
       text = MAIL_TEXT.verifyTwoFactor;
+    } else if (err instanceof PttError && err.code === "UnfinishedDraft") {
+      text = MAIL_TEXT.verifyDraft;
     } else if (err instanceof PttError) {
       logger.warn(`Verify failed for user ${userId}: ${err.code}`);
       text = MAIL_TEXT.verifyFailed(reasonFor(err.code));

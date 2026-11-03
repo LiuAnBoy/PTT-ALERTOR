@@ -81,16 +81,14 @@ jest.mock("../../user/services/errorLogger", () => ({
 }));
 
 const mockRequestMail = jest.fn();
-const mockFindChannel = jest.fn();
+const mockRecordMessage = jest.fn();
+const mockGetUser = jest.fn();
 
 jest.mock("../../mail/services/mailService", () => ({
   MAIL_TEXT: { sending: "⏳ 寄送中…" },
   requestMail: (...a: any[]) => mockRequestMail(...a),
+  recordNotificationMessage: (...a: any[]) => mockRecordMessage(...a),
   describeRequestOutcome: (outcome: { kind: string }) => `refused:${outcome.kind}`,
-}));
-
-jest.mock("../../user/repositories/channelRepository", () => ({
-  findChannelByPlatformUserId: (...a: any[]) => mockFindChannel(...a),
 }));
 
 const mockExecuteSubAction = jest.fn();
@@ -106,6 +104,7 @@ jest.mock("../commandHandler", () => ({
   executeDelete: jest.fn(),
   executeBoardStats: jest.fn(),
   executeUnbind: jest.fn(),
+  getUser: (...a: any[]) => mockGetUser(...a),
   executeBindStart: (...a: any[]) => mockExecuteBindStart(...a),
   executeSubAction: (...a: any[]) => mockExecuteSubAction(...a),
   handlePending: (...a: any[]) => mockHandlePending(...a),
@@ -427,7 +426,7 @@ describe("handleText and callbacks", () => {
   });
 
   it("mail tap: a non-owner is refused with an alert and the message is untouched", async () => {
-    mockFindChannel.mockResolvedValue({ userId: "intruder" });
+    mockGetUser.mockResolvedValue({ id: "intruder" });
     mockRequestMail.mockResolvedValue({ kind: "not_owner" });
     const ctx = createMockContext({ callbackData: "mail:req-1" });
     await handleCallbackQuery(ctx as any);
@@ -441,7 +440,7 @@ describe("handleText and callbacks", () => {
   });
 
   it("mail tap: a presser without a channel never reaches requestMail", async () => {
-    mockFindChannel.mockResolvedValue(null);
+    mockGetUser.mockResolvedValue(null);
     const ctx = createMockContext({ callbackData: "mail:req-1" });
     await handleCallbackQuery(ctx as any);
 
@@ -450,7 +449,7 @@ describe("handleText and callbacks", () => {
   });
 
   it("mail tap: a double tap calls requestMail twice, only the first claims and swaps the keyboard", async () => {
-    mockFindChannel.mockResolvedValue({ userId: "u1" });
+    mockGetUser.mockResolvedValue({ id: "u1" });
     mockRequestMail
       .mockResolvedValueOnce({ kind: "queued", request: { id: "req-1" } })
       .mockResolvedValueOnce({ kind: "not_claimable", status: "QUEUED" });
@@ -470,8 +469,47 @@ describe("handleText and callbacks", () => {
     });
   });
 
+  it("mail tap: a request with no message on record adopts the tapped message", async () => {
+    mockGetUser.mockResolvedValue({ id: "u1" });
+    mockRequestMail.mockResolvedValue({
+      kind: "queued",
+      request: { id: "req-1", chatId: null, messageId: null },
+    });
+    mockRecordMessage.mockResolvedValue(undefined);
+    const ctx = createMockContext({
+      callbackData: "mail:req-1",
+      callbackMessage: { chat: { id: 555 }, message_id: 77 },
+    });
+    await handleCallbackQuery(ctx as any);
+
+    expect(mockRecordMessage).toHaveBeenCalledWith("req-1", { chatId: "555", messageId: "77" });
+    expect(ctx.editMessageReplyMarkup).toHaveBeenCalledTimes(1);
+  });
+
+  it("mail tap: a stored message is left alone, and a failed store does not break the tap", async () => {
+    mockGetUser.mockResolvedValue({ id: "u1" });
+    const message = { chat: { id: 555 }, message_id: 77 };
+    mockRequestMail.mockResolvedValueOnce({
+      kind: "queued",
+      request: { id: "req-1", chatId: "555", messageId: "70" },
+    });
+    await handleCallbackQuery(
+      createMockContext({ callbackData: "mail:req-1", callbackMessage: message }) as any,
+    );
+    expect(mockRecordMessage).not.toHaveBeenCalled();
+
+    mockRequestMail.mockResolvedValueOnce({
+      kind: "queued",
+      request: { id: "req-1", chatId: null, messageId: null },
+    });
+    mockRecordMessage.mockRejectedValue(new Error("db down"));
+    const ctx = createMockContext({ callbackData: "mail:req-1", callbackMessage: message });
+    await handleCallbackQuery(ctx as any);
+    expect(ctx.editMessageReplyMarkup).toHaveBeenCalledTimes(1);
+  });
+
   it("mail tap: cap and exhausted refusals are shown as alerts", async () => {
-    mockFindChannel.mockResolvedValue({ userId: "u1" });
+    mockGetUser.mockResolvedValue({ id: "u1" });
     mockRequestMail.mockResolvedValue({ kind: "cap_reached", limit: 20 });
     const ctx = createMockContext({ callbackData: "mail:req-1" });
     await handleCallbackQuery(ctx as any);

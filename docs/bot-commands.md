@@ -76,11 +76,11 @@ Flow:
 
 **`&` 為保留字**：無法直接用於字面比對。例如 `R&D`、`M&A`、`AT&T` 會被解讀為 AND，
 而非字面字串。若真的需要比對含 `&` 的字面字串，可在輸入時把 `&` 改寫成 regex
-的 unicode escape `&`（這 6 個字元的字串本身不含 `&`，因此不會被 AND
+的 unicode escape `\u0026`（這 6 個字元的字串本身不含 `&`，因此不會被 AND
 拆分；regex 引擎仍會把它解回字面 `&`）。例：
 
-- 想要字面 `R&D`：輸入 `新增 Soft_Job R&D`
-- 想要字面 `M&A`：輸入 `新增 Stock M&A`
+- 想要字面 `R&D`：輸入 `新增 Soft_Job R\u0026D`
+- 想要字面 `M&A`：輸入 `新增 Stock M\u0026A`
 
 **畸形輸入**：`售&&ps5`、`售&`、`&ps5` 等 `&` 兩側出現空 segment 的輸入會被拒絕。
 
@@ -134,6 +134,7 @@ Output (按看板分組):
 ```
 
 寄信功能啟用時，每筆訂閱附一顆 `⚙️ 看板 · 關鍵字` 按鈕（action `sub:<id>:open`，最多 100 顆），按下開啟該訂閱的回信設定卡。
+按鈕文字最多 40 個字元，以 code point 計算，不會把一個表情符號切成兩半。
 
 無訂閱時:
 ```
@@ -194,16 +195,19 @@ Flow:
   ├── 寄信功能關閉      ← 回覆「寄信功能目前未啟用」，不寫入任何東西
   ├── 非私訊            ← 拒絕，請改到私訊
   ├── 顯示聲明（PTT_DISCLAIMER）並詢問 PTT 帳號   → pending: bindId
-  ├── 收到帳號：檢查格式（英文字母開頭、2-12 個英數字，不分大小寫拒絕 guest / new）
+  ├── 收到帳號：非私訊 → 清除 pending 並拒絕
+  │            檢查格式（英文字母開頭、2-12 個英數字，不分大小寫拒絕 guest / new）
   │            → 詢問密碼                          → pending: bindPassword
   └── 收到密碼：
         ├── deleteMessage 刪除密碼訊息（失敗 → 回覆中加上「請手動刪除」警告）
-        ├── encryptSecret（AES-256-GCM）
+        ├── 非私訊 → 拒絕（訊息仍會先被刪除，不入列）
+        ├── encryptSecret（AES-256-GCM），密碼取自未去除空白的原始訊息文字（`CommandContext.rawText`）
         ├── enqueueVerifyJob({ userId, chatId, pttId, passwordEnc })  ← 只有密文
         └── 回覆「⏳ 驗證中…」，登入驗證與結果回覆由 mail-queue worker 處理
 ```
 
-handler 本身不連 PTT，也不記錄密碼。聲明內容見 `PTT_DISCLAIMER`（加密儲存、只在寄信時於記憶體解密、
+handler 本身不連 PTT，也不記錄密碼。`CommandContext.text` 是去除前後空白的文字，用來解析指令；
+密碼不經過它，以免前後有空白的密碼被改掉。聲明內容見 `PTT_DISCLAIMER`（加密儲存、只在寄信時於記憶體解密、
 不寫 log、伺服器管理者技術上仍可解密、請用副帳號、解除PTT 會刪除）。
 
 ### 解除PTT — 刪除已儲存的帳號
@@ -247,6 +251,7 @@ handler 本身不連 PTT，也不記錄密碼。聲明內容見 `PTT_DISCLAIMER`
 
 - 有 pending 且文字不是已知指令 → 依步驟處理這則文字。
 - 文字是已知指令（含 `綁定PTT` 本身）→ 清除 pending，照常執行該指令。PTT 密碼是 ASCII，不會與中文指令混淆。
+- 綁定帳號與綁定密碼兩個步驟只在私訊中進行：在群組收到時清除 pending 並拒絕，密碼訊息仍會先被刪除。
 - 讀取密碼後立即清除 pending。
 - 啟動時 Redis `flushdb` 會一併清掉 pending，使用者重新輸入 `綁定PTT` 即可。
 
@@ -260,9 +265,10 @@ handler 本身不連 PTT，也不記錄密碼。聲明內容見 `PTT_DISCLAIMER`
 | `mail:<id>` | 通知上的「✉️ 寄信給 <作者>」按鈕，`<id>` 是 `MailRequest` id；流程見 [notification-flow.md](notification-flow.md#寄信按鈕) |
 | `mail:noop` | 領取成功後取代寄信按鈕的「⏳ 寄送中…」，只回應 callback，不做任何事 |
 
-`mail:<id>` 把按下按鈕的 Telegram 使用者解析成 User（與其他指令相同，查 `Channel`），再呼叫 `requestMail(id, userId)`。
-成功領取時把訊息的 inline keyboard 換成「⏳ 寄送中…」；任何拒絕都只用 `describeRequestOutcome` 的文字回應 callback，
-並且不動訊息。
+`mail:<id>` 把按下按鈕的 Telegram 使用者解析成 User（與其他指令相同，見「User Resolution」），再呼叫 `requestMail(id, userId)`。
+成功領取時，若請求沒有記錄通知訊息（送出通知時寫入失敗），就以按下的這則訊息補記為該請求的訊息
+（`recordNotificationMessage`），寄信結果才有地方回報；接著把訊息的 inline keyboard 換成「⏳ 寄送中…」。
+任何拒絕都只用 `describeRequestOutcome` 的文字回應 callback，並且不動訊息。
 
 每次按鈕都會呼叫 `answerCallbackQuery`（出錯時也是），以結束 Telegram 端的載入動畫。
 
@@ -286,12 +292,14 @@ if (/^解除ptt$/i.test(text)) return { command: "unbindPtt", args: "" };
 
 ## User Resolution
 
-所有需要使用者身份的指令透過 `CommandContext` 查詢：
+所有需要使用者身份的指令透過 `CommandContext` 查詢，由 `commandHandler.ts` 匯出的 `getUser(ctx)` 完成；
+`channels/telegram.ts` 的 `mail:<id>` 也用同一個函式，不直接存取 repository：
 
 ```
 CommandContext.platformUserId
-  → findChannelByPlatformUserId(ctx.platform, ctx.platformUserId)
-    → channel.user (with User relation)
+  → getUser(ctx)
+    → findChannelByPlatformUserId(ctx.platform, ctx.platformUserId)
+      → channel.user (with User relation)
 ```
 
 找不到 → 回傳 `{ reply: "❌ 請先輸入 /start 來開始使用。" }`。

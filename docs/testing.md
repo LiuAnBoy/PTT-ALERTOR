@@ -91,7 +91,7 @@ import { myFunction } from "../services/myModule";
 
 寄信功能相關測試的重點：
 
-- `notifierService.unit.test.ts`：只有 `offerMail` 回傳 id 時 adapter 才收到按鈕；`offerMail` 丟錯誤時通知照常發送；訊息參考以 `setMessageRef` 存下，存失敗不影響通知。
+- `notifierService.unit.test.ts`：只有 `offerMail` 回傳 id 時 adapter 才收到按鈕；`offerMail` 丟錯誤時通知照常發送；訊息參考以 `recordNotificationMessage` 存下，存失敗不影響通知。
 - `telegram.unit.test.ts`：`sendNotification` 把按鈕轉成 inline keyboard 並回傳訊息參考；`updateMessage` 保留原本文、換按鈕並以回覆回報狀態，容忍 `message is not modified` / `message to edit not found`；`mail:<id>` 由非擁有者按下被拒絕且訊息不變；連按兩次只有第一次換成「⏳ 寄送中…」；`mail:noop` 只回應；Webhook secret 與密碼不進 log。
 - `mailService.unit.test.ts`：組信、claim 結果、狀態轉換、密碼不進 log。`pttTerminal.unit.test.ts`：登入與寄信的畫面狀態機、編碼與截斷。
 

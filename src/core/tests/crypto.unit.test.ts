@@ -30,6 +30,17 @@ describe("crypto", () => {
     expect(() => decryptSecret([v, flip(iv), tag, ct].join("."), key)).toThrow();
   });
 
+  it("rejects a truncated auth tag", () => {
+    const [v, iv, tag, ct] = encryptSecret("secret", key).split(".") as [
+      string,
+      string,
+      string,
+      string,
+    ];
+    const truncated = Buffer.from(tag, "base64").subarray(0, 4).toString("base64");
+    expect(() => decryptSecret([v, iv, truncated, ct].join("."), key)).toThrow();
+  });
+
   it("fails with the wrong key", () => {
     const enc = encryptSecret("secret", key);
     expect(() => decryptSecret(enc, randomBytes(32).toString("base64"))).toThrow();

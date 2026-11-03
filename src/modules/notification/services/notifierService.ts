@@ -2,8 +2,7 @@ import { createLogger } from "../../../core/logger";
 import { getPrisma } from "../../../core/prisma";
 import { getAdapter } from "../../broadcast/registry";
 import type { ButtonRows, MessageRef, NotificationPayload } from "../../broadcast/types";
-import { setMessageRef } from "../../mail/repositories/mailRequestRepository";
-import { offerMail } from "../../mail/services/mailService";
+import { offerMail, recordNotificationMessage } from "../../mail/services/mailService";
 import { logError } from "../../user/services/errorLogger";
 
 export type { NotificationPayload } from "../../broadcast/types";
@@ -64,7 +63,7 @@ async function offerMailButton(
  */
 async function storeMessageRef(requestId: string, ref: MessageRef): Promise<void> {
   try {
-    await setMessageRef(requestId, ref.chatId, ref.messageId);
+    await recordNotificationMessage(requestId, ref);
   } catch (err) {
     logger.warn(`Could not store the message reference: ${(err as Error).message}`);
   }

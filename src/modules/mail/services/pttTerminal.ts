@@ -33,7 +33,8 @@ export type PttErrorCode =
   | "PttBusy"
   | "SecureConnectionRequired"
   | "Timeout"
-  | "ConnectFailed";
+  | "ConnectFailed"
+  | "UnfinishedDraft";
 
 /** Typed failure of the terminal client; `code` is safe to log and to show. */
 export class PttError extends Error {
@@ -204,6 +205,19 @@ export type LoginDecision =
   | { kind: "send"; step: string; keys: Buffer; next: LoginState };
 
 const MAIN_MENU = /【主功能表】|\(G\)oodbye/;
+const RESERVED_IDS = new Set(["guest", "new"]);
+
+/**
+ * Rejects the PTT ids that are not accounts: `guest` and `new` log in without a password, so
+ * a "successful" login with them proves nothing and could mail as a guest.
+ * @param id - The PTT id to check.
+ * @throws PttError `WrongPassword` for `guest` or `new` in any letter case.
+ */
+export function assertRealPttId(id: string): void {
+  if (RESERVED_IDS.has(id.trim().toLowerCase())) {
+    throw new PttError("WrongPassword", "reserved id");
+  }
+}
 
 /**
  * Decides the next login action from the screen shown since the last keys were sent.
@@ -230,13 +244,15 @@ export function decideLogin(screen: string, state: LoginState, input: LoginInput
     keys: typeof keys === "string" ? key(keys) : keys,
     next,
   });
+  const draftError: LoginDecision = { kind: "error", error: new PttError("UnfinishedDraft") };
   const decision = pickLatest<LoginDecision>(screen, [
-    { pattern: MAIN_MENU, make: () => ({ kind: "done" }) },
+    { pattern: MAIN_MENU, enabled: state.passwordSent, make: () => ({ kind: "done" }) },
     { pattern: /您想刪除其他重複登入的連線嗎/, make: () => send("keep-other-session", "n\r") },
     { pattern: /您要刪除以上錯誤嘗試的記錄嗎/, make: () => send("clear-failed-attempts", "y\r") },
     { pattern: /登入太頻繁/, make: () => send("login-too-frequent", " ") },
-    { pattern: /請選擇暫存檔/, make: () => send("pick-draft", "\r") },
-    { pattern: /有一篇文章尚未完成/, make: () => send("skip-unfinished", "Q\r") },
+    // The user's own draft is never answered: any key here could save it to a slot or discard it.
+    { pattern: /請選擇暫存檔/, make: () => draftError },
+    { pattern: /有一篇文章尚未完成/, make: () => draftError },
     { pattern: /任意鍵/, make: () => send("any-key", " ") },
     {
       pattern: /請輸入代號/,
@@ -547,10 +563,11 @@ export class PttTerminal {
    * Logs in, answering the prompts of decision 3 (never kicks another session).
    * @param id - PTT id.
    * @param password - PTT password; never logged.
-   * @throws PttError `WrongPassword`, `TwoFactorRequired`, `PttBusy`,
-   *   `SecureConnectionRequired`, `Timeout` or `ConnectFailed`.
+   * @throws PttError `WrongPassword` (also for the ids guest and new), `TwoFactorRequired`,
+   *   `PttBusy`, `SecureConnectionRequired`, `UnfinishedDraft`, `Timeout` or `ConnectFailed`.
    */
   async login(id: string, password: string): Promise<void> {
+    assertRealPttId(id);
     const input: LoginInput = {
       id: encodeInput(id, { singleLine: true, maxBytes: PTT_ID_MAX_BYTES }),
       password: encodeInput(password, { singleLine: true }),
@@ -770,6 +787,7 @@ export async function sendPttMail(
 ): Promise<MailResult> {
   let terminal: PttTerminal;
   try {
+    assertRealPttId(params.pttId);
     terminal = await PttTerminal.connect(options);
   } catch (error) {
     const err = toPttError(error);
@@ -798,13 +816,15 @@ export async function sendPttMail(
  * @param pttId - PTT id.
  * @param password - PTT password; never logged.
  * @param options - Timeouts and an optional transport factory.
- * @throws PttError with the login failure.
+ * @throws PttError with the login failure; `WrongPassword` for the ids guest and new, which
+ *   are refused before connecting.
  */
 export async function verifyPttLogin(
   pttId: string,
   password: string,
   options: ConnectOptions = {},
 ): Promise<void> {
+  assertRealPttId(pttId);
   const terminal = await PttTerminal.connect(options);
   try {
     await terminal.login(pttId, password);

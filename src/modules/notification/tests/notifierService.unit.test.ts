@@ -43,14 +43,11 @@ jest.mock("../../user/services/errorLogger", () => ({
 }));
 
 const mockOfferMail = jest.fn();
-const mockSetMessageRef = jest.fn();
+const mockRecordMessage = jest.fn();
 
 jest.mock("../../mail/services/mailService", () => ({
   offerMail: (...a: unknown[]) => mockOfferMail(...a),
-}));
-
-jest.mock("../../mail/repositories/mailRequestRepository", () => ({
-  setMessageRef: (...a: unknown[]) => mockSetMessageRef(...a),
+  recordNotificationMessage: (...a: unknown[]) => mockRecordMessage(...a),
 }));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -256,7 +253,7 @@ describe("sendNotification mail button", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockPrisma.user.findUnique.mockResolvedValue({ enable: true, channels });
-    mockSetMessageRef.mockResolvedValue(undefined);
+    mockRecordMessage.mockResolvedValue(undefined);
   });
 
   it("passes the mail button when offerMail returns an id", async () => {
@@ -277,7 +274,7 @@ describe("sendNotification mail button", () => {
     await sendNotification(buildPayload());
 
     expect(mockAdapter.sendNotification).toHaveBeenCalledWith("chat-1", buildPayload());
-    expect(mockSetMessageRef).not.toHaveBeenCalled();
+    expect(mockRecordMessage).not.toHaveBeenCalled();
   });
 
   it("still sends the notification, without a button, when offerMail throws", async () => {
@@ -296,13 +293,13 @@ describe("sendNotification mail button", () => {
 
     await sendNotification(buildPayload());
 
-    expect(mockSetMessageRef).toHaveBeenCalledWith("req-1", "chat-1", "77");
+    expect(mockRecordMessage).toHaveBeenCalledWith("req-1", { chatId: "chat-1", messageId: "77" });
   });
 
   it("does not fail the notification when storing the reference fails", async () => {
     mockOfferMail.mockResolvedValue("req-1");
     mockAdapter.sendNotification.mockResolvedValue({ chatId: "chat-1", messageId: "77" });
-    mockSetMessageRef.mockRejectedValue(new Error("db down"));
+    mockRecordMessage.mockRejectedValue(new Error("db down"));
 
     await expect(sendNotification(buildPayload())).resolves.toBe(true);
   });

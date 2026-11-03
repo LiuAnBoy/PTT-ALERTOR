@@ -181,7 +181,7 @@ export async function executeList(ctx: CommandContext): Promise<CommandResult> {
   const buttons: ButtonRows | undefined = config.mail.enabled
     ? subs.slice(0, MAX_LIST_BUTTONS).map((sub) => [
         {
-          text: `⚙️ ${sub.board} · ${sub.keyword}`.slice(0, MAX_BUTTON_LABEL),
+          text: Array.from(`⚙️ ${sub.board} · ${sub.keyword}`).slice(0, MAX_BUTTON_LABEL).join(""),
           action: subAction(sub.id, "open"),
         },
       ])
@@ -351,7 +351,7 @@ export async function executeUnbind(ctx: CommandContext): Promise<CommandResult>
 /**
  * Take the PTT password: delete the message, encrypt it and queue the verification.
  * The terminal client is never called here, and the plaintext never leaves this function.
- * @param ctx - The command context whose text is the password.
+ * @param ctx - The command context whose untrimmed text is the password.
  * @param pttId - The PTT ID given in the previous step.
  */
 async function receivePassword(ctx: CommandContext, pttId: string): Promise<CommandResult> {
@@ -368,14 +368,15 @@ async function receivePassword(ctx: CommandContext, pttId: string): Promise<Comm
 
   if (!config.mail.enabled) return warn(MAIL_OFF_TEXT);
   if (!ctx.isPrivate) return warn("❌ 請在私訊中綁定 PTT。");
-  if (ctx.text.length > MAX_PASSWORD_LENGTH) {
+  const password = ctx.rawText ?? ctx.text;
+  if (password.length > MAX_PASSWORD_LENGTH) {
     return warn("❌ 密碼長度不正確，請重新輸入「綁定PTT」。");
   }
   const user = await getUser(ctx);
   if (!user) return warn("❌ 請先輸入 /start 來開始使用。");
 
   try {
-    const passwordEnc = encryptSecret(ctx.text, config.mail.encryptKey);
+    const passwordEnc = encryptSecret(password, config.mail.encryptKey);
     await enqueueVerifyJob({
       userId: user.id,
       chatId: ctx.platformChatId,
@@ -517,6 +518,10 @@ export async function handlePending(ctx: CommandContext): Promise<CommandResult 
 
   switch (pending.step) {
     case "bindId": {
+      if (!ctx.isPrivate) {
+        await clearPending(ctx.platformUserId);
+        return { reply: "❌ 請在私訊中綁定 PTT。" };
+      }
       if (!isValidPttId(ctx.text)) {
         return {
           reply:
@@ -528,6 +533,7 @@ export async function handlePending(ctx: CommandContext): Promise<CommandResult 
     }
     case "bindPassword": {
       await clearPending(ctx.platformUserId);
+      // Outside a private chat receivePassword still deletes the message, then refuses.
       return receivePassword(ctx, pending.pttId);
     }
     case "replyText": {
@@ -548,9 +554,12 @@ export async function handlePending(ctx: CommandContext): Promise<CommandResult 
 }
 
 /**
- * Get the user record via channel lookup.
+ * Resolve the user behind a platform account via its channel; the one lookup other modules
+ * use instead of reaching into the channel repository.
+ * @param ctx - The command context identifying the platform user.
+ * @returns The user record, or null when the platform user never sent /start.
  */
-async function getUser(ctx: CommandContext) {
+export async function getUser(ctx: CommandContext) {
   const channel = await findChannelByPlatformUserId(ctx.platform, ctx.platformUserId);
   return channel?.user ?? null;
 }

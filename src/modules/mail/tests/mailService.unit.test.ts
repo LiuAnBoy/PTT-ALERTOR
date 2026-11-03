@@ -16,6 +16,7 @@ import {
   executeSendJob,
   executeVerifyJob,
   offerMail,
+  recordNotificationMessage,
   recoverInFlight,
   requestMail,
 } from "../services/mailService";
@@ -57,6 +58,7 @@ jest.mock("../../user/repositories/subscriptionRepository", () => ({
 jest.mock("../repositories/mailRequestRepository", () => ({
   MAX_MAIL_ATTEMPTS: 3,
   upsertOffer: jest.fn(),
+  setMessageRef: jest.fn(),
   getMailRequest: jest.fn(),
   claim: jest.fn(),
   markSending: jest.fn(),
@@ -243,6 +245,17 @@ describe("offerMail", () => {
     expect(repo.upsertOffer).not.toHaveBeenCalled();
   });
 
+  it("gives no button to a notification of another keyword than the request's", async () => {
+    repo.upsertOffer.mockResolvedValue(
+      request({ status: "OFFERED", attempts: 0, keyword: "other" }),
+    );
+    await expect(offerMail(payload())).resolves.toBeNull();
+    repo.upsertOffer.mockResolvedValue(
+      request({ status: "FAILED", attempts: 1, keyword: "other" }),
+    );
+    await expect(offerMail(payload())).resolves.toBeNull();
+  });
+
   it("returns null without an author", async () => {
     await expect(offerMail({ ...payload(), author: null })).resolves.toBeNull();
   });
@@ -399,6 +412,40 @@ describe("executeSendJob", () => {
     expect(mockSend).not.toHaveBeenCalled();
   });
 
+  it("fails the row and tells the user when markSending throws", async () => {
+    repo.markSending.mockRejectedValue(new Error("db down"));
+    await executeSendJob("req-1");
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(repo.markFailed).toHaveBeenCalledWith("req-1", expect.any(String));
+    expect(mockAdapter.updateMessage).toHaveBeenCalledWith(
+      { chatId: "chat-1", messageId: "msg-1" },
+      expect.stringContaining("寄信失敗"),
+      [[{ text: "✉️ 再試一次", action: "mail:req-1" }]],
+    );
+  });
+
+  it("survives getMailRequest throwing: marks FAILED and reports when the row can be read again", async () => {
+    repo.getMailRequest.mockRejectedValueOnce(new Error("db down")).mockResolvedValue(request());
+    await executeSendJob("req-1");
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(repo.markFailed).toHaveBeenCalledWith("req-1", expect.any(String));
+    expect(mockAdapter.updateMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up quietly when the database stays down", async () => {
+    repo.getMailRequest.mockRejectedValue(new Error("db down"));
+    repo.markFailed.mockRejectedValue(new Error("db down"));
+    await expect(executeSendJob("req-1")).resolves.toBeUndefined();
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockAdapter.updateMessage).not.toHaveBeenCalled();
+  });
+
+  it("maps an unfinished PTT draft to FAILED with the draft advice", async () => {
+    mockSend.mockResolvedValue({ outcome: "not_sent", errorCode: "UnfinishedDraft" });
+    await executeSendJob("req-1");
+    expect(repo.markFailed).toHaveBeenCalledWith("req-1", expect.stringContaining("草稿"));
+  });
+
   it("falls back to sendReply when the adapter cannot edit", async () => {
     mockSend.mockResolvedValue({ outcome: "sent" });
     mockAdapter.updateMessage.mockRejectedValue(new Error("message to edit not found"));
@@ -451,6 +498,13 @@ describe("executeVerifyJob", () => {
     expect(mockAdapter.sendReply.mock.calls[0][1]).toContain("兩步驟");
   });
 
+  it("tells the user to deal with the unfinished PTT draft", async () => {
+    mockVerify.mockRejectedValue(new PttError("UnfinishedDraft"));
+    await executeVerifyJob(data());
+    expect(accounts.upsertPttAccount).not.toHaveBeenCalled();
+    expect(mockAdapter.sendReply.mock.calls[0][1]).toContain("草稿");
+  });
+
   it("never logs the password", async () => {
     mockVerify.mockRejectedValueOnce(new PttError("Timeout"));
     await executeVerifyJob(data());
@@ -460,6 +514,13 @@ describe("executeVerifyJob", () => {
     await executeVerifyJob(data());
     expect(loggedText()).not.toContain(PASSWORD);
     expect(loggedText()).not.toContain(KEY);
+  });
+});
+
+describe("recordNotificationMessage", () => {
+  it("stores the message reference on the request", async () => {
+    await recordNotificationMessage("req-1", { chatId: "c", messageId: "m" });
+    expect(repo.setMessageRef).toHaveBeenCalledWith("req-1", "c", "m");
   });
 });
 

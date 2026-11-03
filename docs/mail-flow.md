@@ -34,11 +34,18 @@
 
 ### 資格判斷與 offer
 
-`checkEligibility` 全部成立才給按鈕：寄信功能啟用（`config.mail.enabled`）、文章有作者、以 `userId + board + keyword` 找到的訂閱 `replyContent` 非空、使用者已綁定 PTT 帳號且未標記失效。`offerMail` 之後對 `(userId, articleCode)` 呼叫 `upsertOffer`：只有列仍為 `OFFERED`，或為 `FAILED` 且嘗試次數未滿，才回傳 request id（即按鈕 id）；已寄出或不明的文章不再出現按鈕。
+`checkEligibility` 全部成立才給按鈕：寄信功能啟用（`config.mail.enabled`）、文章有作者、以 `userId + board + keyword` 找到的訂閱 `replyContent` 非空、使用者已綁定 PTT 帳號且未標記失效。`offerMail` 之後對 `(userId, articleCode)` 呼叫 `upsertOffer`；一列對應一篇文章，且保留最先建立時的關鍵字。只有列的 `keyword` 等於這則通知的關鍵字，且列仍為 `OFFERED`，或為 `FAILED` 且嘗試次數未滿，才回傳 request id（即按鈕 id）。同一篇文章符合使用者另一個關鍵字的通知拿不到按鈕，因為按下去會用另一個關鍵字的回信內容寄信；已寄出或不明的文章也不再出現按鈕。
 
 ### 按下按鈕
 
-`requestMail` 依序處理：功能關閉回 `disabled`；帳號已標記失效回 `account_invalid`（不再嘗試已知錯誤的密碼，避免帳號被鎖）；再由 `claim` 在一個交易內鎖住使用者的 `PttAccount` 列、檢查擁有者、嘗試次數（`MAX_MAIL_ATTEMPTS = 3`）與台北時間每日上限（`MAIL_DAILY_LIMIT`），並以條件式 update 把 `OFFERED` / `FAILED` 改成 `QUEUED`。claim 提交後才加入 `send` job（job id 為 `send-<id>-<attempts>`）。入列失敗會把列改成 `FAILED`。
+`requestMail` 依序處理：功能關閉回 `disabled`；帳號已標記失效回 `account_invalid`（不再嘗試已知錯誤的密碼，避免帳號被鎖）；再由 `claim` 在一個交易內鎖住使用者的 `PttAccount` 列，依序檢查：
+
+1. 列存在且屬於按下的使用者（`not_found`、`not_owner`），使用者已綁定帳號（`no_account`）。
+2. 列的狀態是 `OFFERED` 或 `FAILED`，否則直接回 `not_claimable`（附目前狀態），不計每日上限。
+3. 嘗試次數未達 `MAX_MAIL_ATTEMPTS = 3`（`attempts_exhausted`）。
+4. 台北時間今天已被 claim 的其他請求數（不含正在 claim 的這一列）未達 `MAIL_DAILY_LIMIT`（`cap_reached`）；因此重按一個今天已計入的 `FAILED` 請求不會被每日上限擋下。
+
+通過後以條件式 update 把 `OFFERED` / `FAILED` 改成 `QUEUED`，where 條件同時要求狀態仍是這兩者且 `attempts` 小於上限，所以等鎖等到的 claim 不會讓次數超過上限。claim 提交後才加入 `send` job（job id 為 `send-<id>-<attempts>`）。入列失敗會把列改成 `FAILED`。
 
 回傳的結果型別：`queued`、`disabled`、`account_invalid`、`enqueue_failed`、`not_found`、`not_owner`、`no_account`、`attempts_exhausted`、`cap_reached`、`not_claimable`（附目前狀態）。`describeRequestOutcome` 把非 `queued` 的結果轉成給使用者的短句。
 
@@ -63,20 +70,22 @@
 
 ### send job 結果
 
-`executeSendJob` 只在列為 `QUEUED` 時動作（轉 `SENDING`），重複或過期的 job 什麼都不做。依 `sendPttMail` 結果：
+`executeSendJob` 只在列為 `QUEUED` 時動作（轉 `SENDING`），重複或過期的 job 什麼都不做。讀取列與轉 `SENDING` 這兩步若遇到資料庫錯誤，信一定還沒寄：盡可能把列標為 `FAILED`（再讀一次列取得聊天資訊），並回報使用者；資料庫仍然不通時只記錄錯誤，列留在 `QUEUED`，下次啟動由 `recoverInFlight` 重新入列。依 `sendPttMail` 結果：
 
 - `sent` → `SENT`，訊息「已寄給 <作者>」。
 - `unknown` → `UNKNOWN`，訊息請使用者到 PTT 信箱確認，不附按鈕。
-- `not_sent` → `FAILED`，並依原因：`WrongPassword` 把帳號標記失效（`invalidAt`）並提示重新綁定；`TwoFactorRequired` 回報不支援；`NoSuchUser`、`PttBusy`、`Timeout`、`ConnectFailed` 等回報原因。嘗試次數未滿且不是帳密問題時，訊息附「再試一次」按鈕（`mail:<id>`）。
+- `not_sent` → `FAILED`，並依原因：`WrongPassword` 把帳號標記失效（`invalidAt`）並提示重新綁定；`TwoFactorRequired` 回報不支援；`UnfinishedDraft` 請使用者先登入 PTT 一次，完成或放棄未完成的文章草稿再試；`NoSuchUser`、`PttBusy`、`Timeout`、`ConnectFailed` 等回報原因。嘗試次數未滿且不是帳密問題時，訊息附「再試一次」按鈕（`mail:<id>`）。
 - 呼叫 `sendPttMail` 之前發生的內部錯誤 → `FAILED`；呼叫之後發生的 → `UNKNOWN`，因為信可能已寄出。
+
+`pttTerminal` 的登入只在送出密碼之後才把主選單當成成功，並且在連線前就拒絕 `guest`、`new`（不分大小寫）這兩個不需密碼的代號。登入時若出現「有一篇文章尚未完成」或「請選擇暫存檔」，客戶端回報 `UnfinishedDraft`，不送出 `Q`、`S` 或任何暫存檔編號，直接關閉連線，使用者的草稿不會被丟棄或存入暫存檔。
 
 ### verify job
 
-綁定帳號時 webhook 不直接登入，而是 `enqueueVerifyJob` 把 `{ userId, chatId, pttId, passwordEnc }`（只有密文）放進 `mail-queue`（`removeOnComplete` / `removeOnFail` 皆為 true）。`executeVerifyJob` 解密後呼叫 `verifyPttLogin`：成功就 `upsertPttAccount`（密文原樣寫入）並回覆「已綁定」；`WrongPassword`、`TwoFactorRequired` 與其他失敗各有回覆，失敗時不寫入帳號。
+綁定帳號時 webhook 不直接登入，而是 `enqueueVerifyJob` 把 `{ userId, chatId, pttId, passwordEnc }`（只有密文）放進 `mail-queue`（`removeOnComplete` / `removeOnFail` 皆為 true）。`executeVerifyJob` 解密後呼叫 `verifyPttLogin`：成功就 `upsertPttAccount`（密文原樣寫入）並回覆「已綁定」；`WrongPassword`（含 `guest`、`new` 代號）、`TwoFactorRequired`、`UnfinishedDraft`（請使用者先登入 PTT 處理草稿，再重新綁定）與其他失敗各有回覆，失敗時不寫入帳號。
 
 ### 結果回報
 
-結果文字都集中在 `mailService.ts` 的 `MAIL_TEXT`。按下按鈕且 claim 成功時，通知的按鈕換成不可再按的「⏳ 寄送中…」。send 結果：請求記有 `chatId` / `messageId` 且 adapter 實作了可選的 `updateMessage` 時，原通知的文字保持不變，只把按鈕換成結果需要的按鈕（「再試一次」或不留按鈕），結果文字以回覆該通知的訊息送出；`updateMessage` 失敗或不支援時改用 `sendReply(chatId)`。verify 結果一律 `sendReply(chatId)`。回報失敗只記錄，不影響已寫入的狀態。
+結果文字都集中在 `mailService.ts` 的 `MAIL_TEXT`。通知送出時，`notifierService` 透過 `recordNotificationMessage` 把訊息的 `chatId` / `messageId` 記在請求上；沒有記到時（寫入失敗），按下按鈕且 claim 成功的 Telegram callback 會把按下的那則訊息補記進去。按下按鈕且 claim 成功時，通知的按鈕換成不可再按的「⏳ 寄送中…」。send 結果：請求記有 `chatId` / `messageId` 且 adapter 實作了可選的 `updateMessage` 時，原通知的文字保持不變，只把按鈕換成結果需要的按鈕（「再試一次」或不留按鈕），結果文字以回覆該通知的訊息送出；`updateMessage` 失敗、不支援，或只有 `chatId` 時改用 `sendReply(chatId)`。verify 結果一律 `sendReply(chatId)`。回報失敗只記錄，不影響已寫入的狀態。
 
 ## Queue 設定
 

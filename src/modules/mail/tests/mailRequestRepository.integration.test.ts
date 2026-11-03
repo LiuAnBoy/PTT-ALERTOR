@@ -76,8 +76,32 @@ describe("mailRequestRepository (real Postgres)", () => {
     expect((await claim(a!.id, u.id, 1, now)).kind).toBe("claimed");
     await prisma.mailRequest.update({ where: { id: a!.id }, data: { status: "FAILED" } });
     expect((await claim(b!.id, u.id, 1, now)).kind).toBe("cap_reached");
-    // The failed request itself is still retappable and is the one counted.
-    expect((await claim(a!.id, u.id, 2, now)).kind).toBe("claimed");
+    // The failed request itself is still retappable: it is not counted against itself.
+    expect((await claim(a!.id, u.id, 1, now)).kind).toBe("claimed");
+  });
+
+  it("a request past FAILED is not_claimable even at the cap", async () => {
+    const u = await user();
+    const [a, b] = await Promise.all([offer(u.id), offer(u.id)]);
+    expect((await claim(a!.id, u.id, 1, now)).kind).toBe("claimed");
+    await prisma.mailRequest.update({ where: { id: a!.id }, data: { status: "SENT" } });
+    expect(await claim(a!.id, u.id, 1, now)).toEqual({ kind: "not_claimable", status: "SENT" });
+    expect((await claim(b!.id, u.id, 1, now)).kind).toBe("cap_reached");
+  });
+
+  it("the last allowed attempt is claimed once and then refused", async () => {
+    const u = await user();
+    const req = await offer(u.id);
+    await prisma.mailRequest.update({
+      where: { id: req.id },
+      data: { attempts: MAX_MAIL_ATTEMPTS - 1 },
+    });
+    expect((await claim(req.id, u.id, 20, now)).kind).toBe("claimed");
+    await prisma.mailRequest.update({ where: { id: req.id }, data: { status: "FAILED" } });
+    expect((await claim(req.id, u.id, 20, now)).kind).toBe("attempts_exhausted");
+    expect((await prisma.mailRequest.findUnique({ where: { id: req.id } }))?.attempts).toBe(
+      MAX_MAIL_ATTEMPTS,
+    );
   });
 
   it("OFFERED rows do not count and other users' requests are refused", async () => {

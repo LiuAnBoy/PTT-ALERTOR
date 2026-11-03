@@ -13,6 +13,8 @@ export function createMockContext(overrides?: {
   chat?: { id: number; type?: string } | null;
   messageText?: string;
   callbackData?: string;
+  /** The message the pressed inline button sits under */
+  callbackMessage?: { chat: { id: number }; message_id: number };
 }) {
   return {
     from:
@@ -27,7 +29,9 @@ export function createMockContext(overrides?: {
     editMessageReplyMarkup: jest.fn().mockResolvedValue(true),
     answerCallbackQuery: jest.fn().mockResolvedValue(true),
     callbackQuery:
-      overrides?.callbackData !== undefined ? { data: overrides.callbackData } : undefined,
+      overrides?.callbackData !== undefined
+        ? { data: overrides.callbackData, message: overrides.callbackMessage }
+        : undefined,
   };
 }
 

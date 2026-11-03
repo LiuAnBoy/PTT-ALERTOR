@@ -4,6 +4,7 @@
  * Covers parseCommand, executeStart, executeList, executeAdd, executeDelete.
  */
 
+import { decryptSecret } from "../../../core/crypto";
 import {
   executeAdd,
   executeBindStart,
@@ -588,6 +589,38 @@ describe("bind flow", () => {
     expect(allLoggedText()).not.toContain(PASSWORD);
   });
 
+  it("encrypts the untrimmed message text as the password", async () => {
+    await toPasswordStep();
+    await handlePending(
+      buildCtx({
+        text: "pw 1",
+        rawText: " pw 1 ",
+        deleteInputMessage: jest.fn().mockResolvedValue(undefined),
+      }),
+    );
+    const job = mockEnqueueVerifyJob.mock.calls[0][0];
+    expect(decryptSecret(job.passwordEnc, mockConfig.mail.encryptKey)).toBe(" pw 1 ");
+  });
+
+  it("refuses the ID step outside a private chat and forgets the pending state", async () => {
+    await executeBindStart(buildCtx());
+    const result = await handlePending(buildCtx({ text: "myPttId", isPrivate: false }));
+    expect(result?.reply).toContain("私訊");
+    expect(redisStore.has("mail:pending:123")).toBe(false);
+  });
+
+  it("refuses the password step outside a private chat, deleting the message and queueing nothing", async () => {
+    await toPasswordStep();
+    const deleteInputMessage = jest.fn().mockResolvedValue(undefined);
+    const result = await handlePending(
+      buildCtx({ text: PASSWORD, isPrivate: false, deleteInputMessage }),
+    );
+    expect(result?.reply).toContain("私訊");
+    expect(deleteInputMessage).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueVerifyJob).not.toHaveBeenCalled();
+    expect(redisStore.has("mail:pending:123")).toBe(false);
+  });
+
   it("a command clears the pending state and runs normally", async () => {
     await executeBindStart(buildCtx());
     const result = await handlePending(buildCtx({ text: "幫助" }));
@@ -718,6 +751,13 @@ describe("buttons on 新增 and 清單", () => {
       "sub:sub-1:open",
       "sub:sub-2:open",
     ]);
+  });
+
+  it("cuts a long button label by code points, never inside a surrogate pair", async () => {
+    mockGetSubscriptions.mockResolvedValue([buildSub({ keyword: "😀".repeat(60) })]);
+    const label = (await executeList(buildCtx())).buttons![0]![0]!.text;
+    expect(Array.from(label)).toHaveLength(40);
+    expect(label).not.toMatch(/[\ud800-\udbff]$/);
   });
 
   it("offers no buttons when mail is disabled", async () => {

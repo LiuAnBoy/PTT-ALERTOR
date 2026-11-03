@@ -100,7 +100,7 @@ Telegram 把 `buttons` 轉成 inline keyboard（`callback_data` 即 `action`，`
 ### 訊息參考（message ref）
 
 `PlatformAdapter.sendNotification` 回傳送出的訊息參考 `{ chatId, messageId }`（無法提供的平台回傳 `void`）。
-有按鈕且拿到參考時，`notifierService` 呼叫 `setMessageRef` 把它存到該 `MailRequest`，之後寄信結果就能回報在這則通知上。
+有按鈕且拿到參考時，`notifierService` 呼叫 `recordNotificationMessage`（mailService）把它存到該 `MailRequest`，之後寄信結果就能回報在這則通知上。
 多個頻道時存第一個成功回傳的參考。存參考失敗只記錄警告，不影響通知的結果，也不會觸發 BullMQ 重試。
 BullMQ 因暫時性錯誤重試同一則通知時，`offerMail` 會對仍為 `OFFERED` 的請求回傳同一個 id，不會產生第二筆。
 

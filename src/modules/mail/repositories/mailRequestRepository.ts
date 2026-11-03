@@ -64,8 +64,9 @@ export async function getMailRequest(id: string): Promise<MailRequest | null> {
 
 /**
  * Atomically claim a request: lock the user's PttAccount row, count the user's claims made
- * today in Asia/Taipei (by queuedAt, whatever the later status, OFFERED excluded), and move
- * OFFERED or FAILED to QUEUED with a conditional update.
+ * today in Asia/Taipei (by queuedAt, whatever the later status, OFFERED and the row being
+ * claimed excluded), and move OFFERED or FAILED to QUEUED with a conditional update that also
+ * requires attempts below the limit. A row in any other status is refused before the count.
  * @param requestId - The request UUID.
  * @param userId - The user pressing the button.
  * @param dailyLimit - Maximum claims per Taipei day.
@@ -87,10 +88,10 @@ export async function claim(
       SELECT id FROM ptt_accounts WHERE "userId" = ${userId} FOR UPDATE`;
     if (locked.length === 0) return { kind: "no_account" };
 
-    if (
-      (existing.status === "OFFERED" || existing.status === "FAILED") &&
-      existing.attempts >= MAX_MAIL_ATTEMPTS
-    ) {
+    if (existing.status !== "OFFERED" && existing.status !== "FAILED") {
+      return { kind: "not_claimable", status: existing.status };
+    }
+    if (existing.attempts >= MAX_MAIL_ATTEMPTS) {
       return { kind: "attempts_exhausted", max: MAX_MAIL_ATTEMPTS };
     }
 
@@ -98,6 +99,7 @@ export async function claim(
     const claimedToday = await tx.mailRequest.count({
       where: {
         userId,
+        id: { not: requestId },
         status: { not: "OFFERED" },
         queuedAt: { gte: dayStart, lt: new Date(dayStart.getTime() + DAY_MS) },
       },
@@ -105,7 +107,12 @@ export async function claim(
     if (claimedToday >= dailyLimit) return { kind: "cap_reached", limit: dailyLimit };
 
     const { count } = await tx.mailRequest.updateMany({
-      where: { id: requestId, userId, status: { in: ["OFFERED", "FAILED"] } },
+      where: {
+        id: requestId,
+        userId,
+        status: { in: ["OFFERED", "FAILED"] },
+        attempts: { lt: MAX_MAIL_ATTEMPTS },
+      },
       data: {
         status: "QUEUED",
         queuedAt: now,

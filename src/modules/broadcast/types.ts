@@ -15,8 +15,10 @@ export interface CommandContext {
   displayName?: string;
   /** Raw platform user data for storage */
   rawData?: Record<string, unknown>;
-  /** The raw text message from the user */
+  /** The text message from the user, trimmed (what commands are parsed from) */
   text: string;
+  /** The message text exactly as sent, untrimmed; a password is taken from this */
+  rawText?: string;
   /** True when the message came from a one-to-one chat (never set for groups or channels) */
   isPrivate?: boolean;
   /** Deletes the user's incoming message; rejects when the platform refuses */
