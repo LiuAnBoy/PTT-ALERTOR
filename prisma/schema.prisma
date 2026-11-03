@@ -16,6 +16,8 @@ model User {
   phone         String?
   subscriptions Subscription[]
   channels      Channel[]
+  pttAccount    PttAccount?
+  mailRequests  MailRequest[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -50,6 +52,10 @@ model Subscription {
   keyword String
   userId  String
 
+  /// Mail text sent to the article author; null means mail is not offered.
+  replyContent         String?
+  replyIncludeOriginal Boolean @default(false)
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
@@ -62,7 +68,7 @@ model Subscription {
 // ─── Article ────────────────────────────────────────
 
 model Article {
-  code      String   @id
+  code      String  @id
   timestamp BigInt
   title     String
   link      String
@@ -70,10 +76,10 @@ model Article {
   board     String
   ip        String?
   content   String?
-  pushSum   Int      @default(0)
-  positive  Int      @default(0)
-  negative  Int      @default(0)
-  neutral   Int      @default(0)
+  pushSum   Int     @default(0)
+  positive  Int     @default(0)
+  negative  Int     @default(0)
+  neutral   Int     @default(0)
   comments  Json?
 
   createdAt   DateTime @default(now())
@@ -102,4 +108,58 @@ model CrawlerLog {
 
   @@index([level, createdAt])
   @@map("crawler_logs")
+}
+
+// ─── PttAccount ─────────────────────────────────────
+
+model PttAccount {
+  id          String    @id @default(uuid())
+  userId      String    @unique
+  pttId       String
+  /// AES-256-GCM ciphertext, format v1.<iv>.<tag>.<ct>
+  passwordEnc String
+  invalidAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ptt_accounts")
+}
+
+// ─── MailRequest ────────────────────────────────────
+
+enum MailRequestStatus {
+  OFFERED
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+  UNKNOWN
+}
+
+model MailRequest {
+  id          String            @id @default(uuid())
+  userId      String
+  board       String
+  articleCode String
+  author      String
+  title       String
+  keyword     String
+  status      MailRequestStatus @default(OFFERED)
+  error       String?
+  chatId      String?
+  messageId   String?
+  /// Successful claims so far; bounded by MAX_MAIL_ATTEMPTS
+  attempts    Int               @default(0)
+  queuedAt    DateTime          @default(now())
+  finishedAt  DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, articleCode])
+  @@index([status])
+  @@map("mail_requests")
 }

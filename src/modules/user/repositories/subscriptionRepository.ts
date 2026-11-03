@@ -75,3 +75,45 @@ export async function countByBoard(
   });
   return rows.map((r) => ({ keyword: r.keyword, subs: r._count._all }));
 }
+
+/**
+ * Get one subscription by id.
+ * @param id - The subscription UUID.
+ * @returns The subscription record or null.
+ */
+export async function getSubscriptionById(id: string) {
+  return getPrisma().subscription.findUnique({ where: { id } });
+}
+
+/**
+ * Find one subscription by user, board, and keyword.
+ * @param userId - The user's UUID.
+ * @param board - The board name.
+ * @param keyword - The keyword.
+ * @returns The subscription record or null.
+ */
+export async function findSubscription(userId: string, board: string, keyword: string) {
+  return getPrisma().subscription.findUnique({
+    where: { userId_board_keyword: { userId, board, keyword } },
+  });
+}
+
+/**
+ * Set or clear the mail text of a subscription.
+ * @param id - The subscription UUID.
+ * @param replyContent - The mail text, or null to turn mail off for it.
+ * @returns The updated subscription record.
+ */
+export async function setReplyContent(id: string, replyContent: string | null) {
+  return getPrisma().subscription.update({ where: { id }, data: { replyContent } });
+}
+
+/**
+ * Set whether the mail quotes the original article.
+ * @param id - The subscription UUID.
+ * @param replyIncludeOriginal - True to attach the original article.
+ * @returns The updated subscription record.
+ */
+export async function setReplyIncludeOriginal(id: string, replyIncludeOriginal: boolean) {
+  return getPrisma().subscription.update({ where: { id }, data: { replyIncludeOriginal } });
+}

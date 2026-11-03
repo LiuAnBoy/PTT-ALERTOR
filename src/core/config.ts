@@ -16,6 +16,60 @@ function parseRedisDb(raw: string | undefined): number {
   return n;
 }
 
+/** Settings of the PTT mail feature. */
+export interface MailConfig {
+  /** True only when both PTT_ENCRYPT_KEY and TELEGRAM_WEBHOOK_SECRET are set and valid */
+  enabled: boolean;
+  /** Maximum mail claims per user per Asia/Taipei day */
+  dailyLimit: number;
+  /** Base64 of the 32-byte AES key, empty when unset */
+  encryptKey: string;
+}
+
+/**
+ * Build the mail settings and the webhook secret from raw env values.
+ * Pure so tests can evaluate it for given values; throws on malformed values
+ * so a bad key or secret never silently disables or weakens the feature.
+ * @param env - Raw values of PTT_ENCRYPT_KEY, MAIL_DAILY_LIMIT and TELEGRAM_WEBHOOK_SECRET.
+ * @returns The mail config and the validated webhook secret ("" when unset).
+ * @throws Error when the key is not 32 bytes, the secret has characters Telegram refuses
+ *   or exceeds 256 characters, or the daily limit is not a positive integer.
+ */
+export function buildMailConfig(env: {
+  PTT_ENCRYPT_KEY?: string | undefined;
+  MAIL_DAILY_LIMIT?: string | undefined;
+  TELEGRAM_WEBHOOK_SECRET?: string | undefined;
+}): { mail: MailConfig; webhookSecret: string } {
+  const encryptKey = env.PTT_ENCRYPT_KEY ?? "";
+  if (encryptKey && Buffer.from(encryptKey, "base64").length !== 32) {
+    throw new Error("Invalid PTT_ENCRYPT_KEY: must be base64 of exactly 32 bytes.");
+  }
+  const webhookSecret = env.TELEGRAM_WEBHOOK_SECRET ?? "";
+  if (webhookSecret && (webhookSecret.length > 256 || !/^[A-Za-z0-9_-]+$/.test(webhookSecret))) {
+    throw new Error(
+      "Invalid TELEGRAM_WEBHOOK_SECRET: only A-Z a-z 0-9 _ - and at most 256 characters.",
+    );
+  }
+  const rawLimit = env.MAIL_DAILY_LIMIT;
+  let dailyLimit = 20;
+  if (rawLimit !== undefined && rawLimit !== "") {
+    dailyLimit = Number(rawLimit);
+    if (!Number.isInteger(dailyLimit) || dailyLimit < 1) {
+      throw new Error(`Invalid MAIL_DAILY_LIMIT="${rawLimit}": must be a positive integer.`);
+    }
+  }
+  return {
+    mail: { enabled: encryptKey !== "" && webhookSecret !== "", dailyLimit, encryptKey },
+    webhookSecret,
+  };
+}
+
+const mailEnv = buildMailConfig({
+  PTT_ENCRYPT_KEY: process.env["PTT_ENCRYPT_KEY"],
+  MAIL_DAILY_LIMIT: process.env["MAIL_DAILY_LIMIT"],
+  TELEGRAM_WEBHOOK_SECRET: process.env["TELEGRAM_WEBHOOK_SECRET"],
+});
+
 /**
  * Centralized application configuration.
  * Reads from process.env once at module load time (after dotenv).
@@ -57,7 +111,12 @@ export const config = {
     webhookUrl: process.env["TELEGRAM_WEBHOOK_URL"] ?? "",
     /** Fill in your Telegram chat ID to receive FATAL/ERROR alerts */
     adminChatId: process.env["ADMIN_TELEGRAM_ID"] ?? "",
+    /** Secret Telegram echoes in a header on every webhook call (optional) */
+    webhookSecret: mailEnv.webhookSecret,
   },
+
+  /** PTT mail-to-author feature */
+  mail: mailEnv.mail,
 } as const;
 
 // ── Validate required environment variables on module load ──────────────────
