@@ -36,6 +36,7 @@ const FAIL_REASON = {
   connect: "無法連線到 PTT",
   secure: "PTT 要求安全連線，無法登入",
   draft: "這個 PTT 帳號有未完成的文章草稿，請先登入 PTT 一次，完成或放棄該草稿後再試",
+  sessions: "這個 PTT 帳號同時登入的連線太多（3 個以上），為了不踢掉你的其他連線，請先登出其中幾個",
   generic: "寄信失敗",
 } as const;
 
@@ -358,6 +359,8 @@ function reasonFor(code: PttError["code"] | undefined): string {
       return FAIL_REASON.secure;
     case "UnfinishedDraft":
       return FAIL_REASON.draft;
+    case "TooManySessions":
+      return FAIL_REASON.sessions;
     default:
       return FAIL_REASON.generic;
   }

@@ -484,6 +484,12 @@ describe("executeSendJob", () => {
     expect(repo.markFailed).toHaveBeenCalledWith("req-1", expect.stringContaining("草稿"));
   });
 
+  it("maps too many PTT sessions to FAILED with the log-out advice", async () => {
+    mockSend.mockResolvedValue({ outcome: "not_sent", errorCode: "TooManySessions" });
+    await executeSendJob("req-1");
+    expect(repo.markFailed).toHaveBeenCalledWith("req-1", expect.stringContaining("連線太多"));
+  });
+
   it("falls back to sendReply when the adapter cannot edit", async () => {
     mockSend.mockResolvedValue({ outcome: "sent" });
     mockAdapter.updateMessage.mockRejectedValue(new Error("message to edit not found"));

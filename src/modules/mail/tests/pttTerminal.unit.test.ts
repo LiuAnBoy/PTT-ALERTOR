@@ -157,6 +157,14 @@ describe("decideLogin", () => {
     expect(keys("歡迎光臨", fresh)).toBe("wait");
   });
 
+  it("records a yes/no answer and ignores the prompt redrawn with that answer", () => {
+    const d = decideLogin("您想刪除其他重複登入的連線嗎？[Y/n]", afterPw, loginInput);
+    const next = (d as { next: LoginState }).next;
+    expect(next.answered).toEqual(["keep-other-session"]);
+    expect(keys("您想刪除其他重複登入的連線嗎？[Y/n] n", next)).toBe("wait");
+    expect(keys("您想刪除其他重複登入的連線嗎？[Y/n] n\r\n請按任意鍵繼續", next)).toBe(" ");
+  });
+
   it("lets the newest prompt win over a stale one in the same buffer", () => {
     expect(keys("請按任意鍵繼續\r\n【主功能表】", afterPw)).toBe("done");
     expect(keys("【主功能表】\r\n請按任意鍵繼續", afterPw)).toBe(" ");
@@ -201,6 +209,16 @@ describe("decideMail", () => {
     expect(decideMail("after_save", "請按任意鍵繼續", input, false)).toMatchObject({
       next: "after_save",
     });
+  });
+
+  it("does not answer the signature or draft-copy prompt again when it is redrawn", () => {
+    expect(
+      decideMail("after_save", "選擇簽名檔 (x=隨機) 0", input, false, ["signature"]).kind,
+    ).toBe("wait");
+    const echo = "已順利寄出，是否自存底稿 (Y/N)? [N] n";
+    expect(decideMail("after_save", echo, input, true, ["signature", "skip-draft-copy"]).kind).toBe(
+      "wait",
+    );
   });
 
   it("reports a missing recipient and waits on an unrelated screen", () => {
@@ -294,6 +312,23 @@ describe("PttTerminal.login", () => {
     expect(transport.sent.map(latin)).toEqual(["alice\r", "s3cret\r", "n\r", " "]);
   });
 
+  it("sends no stray key when PTT echoes the duplicate-login answer on its own", async () => {
+    // Live PTT redraws the prompt with the typed "n" before the next screen; answering the echo
+    // again put an Enter on the main menu and opened the board list.
+    const duplicate = "您想刪除其他重複登入的連線嗎？[Y/n]";
+    const transport = new FakeTransport([
+      "請輸入您的密碼:",
+      duplicate,
+      `${duplicate} n`,
+      "\x1b[2J【主功能表】 (G)oodbye",
+    ]);
+    const term = new PttTerminal(transport, OPTS);
+    transport.emit("請輸入代號:");
+    setTimeout(() => transport.emit("請按任意鍵繼續"), 20);
+    await term.login("alice", "s3cret");
+    expect(transport.sent.map(latin)).toEqual(["alice\r", "s3cret\r", "n\r", " "]);
+  });
+
   it("accumulates a prompt split across chunks, including a split Big5 character", async () => {
     const transport = new FakeTransport(["請輸入您的密碼:", "【主功能表】"]);
     const term = new PttTerminal(transport, OPTS);
@@ -313,6 +348,20 @@ describe("PttTerminal.login", () => {
     const term = new PttTerminal(transport, OPTS);
     transport.emit("請輸入代號:");
     await expect(term.login("alice", "pw")).rejects.toMatchObject({ code });
+  });
+
+  it("reports TooManySessions when PTT disconnects after the duplicate-login n", async () => {
+    // pttbbs drops a login that keeps three or more other sessions, with no message.
+    const transport = new FakeTransport(["請輸入您的密碼:", "您想刪除其他重複登入的連線嗎？[Y/n]"]);
+    const term = new PttTerminal(transport, OPTS);
+    transport.emit("請輸入代號:");
+    const send = transport.send.bind(transport);
+    transport.send = (d) => {
+      send(d);
+      if (latin(d) === "n\r") setImmediate(() => transport.onClose?.());
+    };
+    await expect(term.login("alice", "pw")).rejects.toMatchObject({ code: "TooManySessions" });
+    expect(transport.sent.map(latin)).toEqual(["alice\r", "pw\r", "n\r"]);
   });
 
   it("times out when no expected prompt arrives", async () => {
@@ -435,9 +484,8 @@ describe("PttTerminal.sendMail", () => {
 });
 
 describe("PttTerminal.logout", () => {
-  it("presses G and confirms with y, then waits for the close", async () => {
-    const { transport, term } = await loggedIn([...LOGIN_REPLIES, ...LOGOUT_REPLIES]);
-    const closing = new Promise<void>((resolve) => {
+  const closeOnConfirm = (transport: FakeTransport) =>
+    new Promise<void>((resolve) => {
       const send = transport.send.bind(transport);
       transport.send = (d) => {
         send(d);
@@ -445,9 +493,24 @@ describe("PttTerminal.logout", () => {
         if (latin(d) === "y\r") resolve();
       };
     });
+
+  it("presses G straight from the main menu, confirms with y, then waits for the close", async () => {
+    // On the main menu a left arrow only moves the cursor, so the menu text never comes back.
+    const { transport, term } = await loggedIn([...LOGIN_REPLIES, ...LOGOUT_REPLIES.slice(1)]);
+    const closing = closeOnConfirm(transport);
     await term.logout();
     await closing;
-    expect(transport.sent.slice(4).map(latin)).toEqual(["\x1b[D", "G\r", "y\r"]);
+    expect(transport.sent.slice(4).map(latin)).toEqual(["G\r", "y\r"]);
+  });
+
+  it("goes back to the main menu with a left arrow from another screen", async () => {
+    const transport = new FakeTransport(LOGOUT_REPLIES);
+    const term = new PttTerminal(transport, OPTS);
+    transport.emit("【電子郵件】");
+    const closing = closeOnConfirm(transport);
+    await term.logout();
+    await closing;
+    expect(transport.sent.map(latin)).toEqual(["\x1b[D", "G\r", "y\r"]);
   });
 
   it("does not throw when the screen never responds", async () => {

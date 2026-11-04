@@ -34,7 +34,8 @@ export type PttErrorCode =
   | "SecureConnectionRequired"
   | "Timeout"
   | "ConnectFailed"
-  | "UnfinishedDraft";
+  | "UnfinishedDraft"
+  | "TooManySessions";
 
 /** Typed failure of the terminal client; `code` is safe to log and to show. */
 export class PttError extends Error {
@@ -189,6 +190,11 @@ function pickLatest<T>(screen: string, rules: Rule<T>[]): T | undefined {
 export interface LoginState {
   idSent: boolean;
   passwordSent: boolean;
+  /**
+   * One-shot prompts already answered. PTT redraws a yes/no prompt with the typed answer, so the
+   * echo would otherwise match the prompt again and send a stray key into the next screen.
+   */
+  answered?: readonly string[];
 }
 
 export interface LoginInput {
@@ -249,10 +255,15 @@ export function decideLogin(screen: string, state: LoginState, input: LoginInput
     keys: typeof keys === "string" ? key(keys) : keys,
     next,
   });
+  const answered = state.answered ?? [];
+  const once = (step: string, keys: string) => ({
+    enabled: !answered.includes(step),
+    make: () => send(step, keys, { ...state, answered: [...answered, step] }),
+  });
   const decision = pickLatest<LoginDecision>(screen, [
     { pattern: MAIN_MENU, enabled: state.passwordSent, make: () => ({ kind: "done" }) },
-    { pattern: /您想刪除其他重複登入的連線嗎/, make: () => send("keep-other-session", "n\r") },
-    { pattern: /您要刪除以上錯誤嘗試的記錄嗎/, make: () => send("clear-failed-attempts", "y\r") },
+    { pattern: /您想刪除其他重複登入的連線嗎/, ...once("keep-other-session", "n\r") },
+    { pattern: /您要刪除以上錯誤嘗試的記錄嗎/, ...once("clear-failed-attempts", "y\r") },
     { pattern: /登入太頻繁/, make: () => send("login-too-frequent", " ") },
     { pattern: /任意鍵/, make: () => send("any-key", " ") },
     {
@@ -319,6 +330,8 @@ export function isSendConfirmed(screen: string): boolean {
  * @param screen - Decoded screen text with ANSI removed.
  * @param input - The encoded recipient, subject and body.
  * @param confirmed - Whether the sent confirmation was already seen.
+ * @param answered - Steps already sent; a one-shot prompt redrawn with its typed answer is not
+ *   answered again.
  * @returns Wait, fail with a typed error, or send keys and move to the next stage.
  */
 export function decideMail(
@@ -326,6 +339,7 @@ export function decideMail(
   screen: string,
   input: MailInput,
   confirmed: boolean,
+  answered: readonly string[] = [],
 ): MailDecision {
   const send = (
     step: string,
@@ -370,8 +384,16 @@ export function decideMail(
     case "after_save":
       return (
         pickLatest<MailDecision>(screen, [
-          { pattern: /選擇簽名檔|x=隨機/, make: () => send("signature", "0\r", "after_save") },
-          { pattern: /是否自存底稿/, make: () => send("skip-draft-copy", "n\r", "after_save") },
+          {
+            pattern: /選擇簽名檔|x=隨機/,
+            enabled: !answered.includes("signature"),
+            make: () => send("signature", "0\r", "after_save"),
+          },
+          {
+            pattern: /是否自存底稿/,
+            enabled: !answered.includes("skip-draft-copy"),
+            make: () => send("skip-draft-copy", "n\r", "after_save"),
+          },
           {
             pattern: /任意鍵/,
             make: () => send("ack", "\r", confirmed ? "finished" : "after_save"),
@@ -561,11 +583,13 @@ export class PttTerminal {
   }
 
   /**
-   * Logs in, answering the prompts of decision 3 (never kicks another session).
+   * Logs in, answering the prompts of decision 3: the duplicate-login prompt is always answered
+   * n, so another session of the account is never kicked.
    * @param id - PTT id.
    * @param password - PTT password; never logged.
    * @throws PttError `WrongPassword` (also for the ids guest and new), `TwoFactorRequired`,
-   *   `PttBusy`, `SecureConnectionRequired`, `UnfinishedDraft`, `Timeout` or `ConnectFailed`.
+   *   `PttBusy`, `SecureConnectionRequired`, `UnfinishedDraft`, `TooManySessions`, `Timeout` or
+   *   `ConnectFailed`.
    */
   async login(id: string, password: string): Promise<void> {
     assertRealPttId(id);
@@ -577,11 +601,26 @@ export class PttTerminal {
       throw new PttError("WrongPassword", "empty credentials");
     }
     let state: LoginState = { idSent: false, passwordSent: false };
+    let lastStep = "";
     for (let i = 0; i < MAX_STEPS; i++) {
-      const decision = await this.waitFor("login", (screen) => {
-        const d = decideLogin(screen, state, input);
-        return d.kind === "wait" ? undefined : d;
-      });
+      let decision: Exclude<LoginDecision, { kind: "wait" }>;
+      try {
+        decision = await this.waitFor("login", (screen) => {
+          const d = decideLogin(screen, state, input);
+          return d.kind === "wait" ? undefined : d;
+        });
+      } catch (error) {
+        // pttbbs (multi_user_check) disconnects a login that declines to kick the other
+        // sessions while three or more are still on, without any message.
+        if (
+          lastStep === "keep-other-session" &&
+          error instanceof PttError &&
+          error.code === "ConnectFailed"
+        ) {
+          throw new PttError("TooManySessions", "closed after declining to kick other sessions");
+        }
+        throw error;
+      }
       if (decision.kind === "error") throw decision.error;
       if (decision.kind === "done") {
         logger.debug({ step: "login-done" }, "ptt step");
@@ -590,6 +629,7 @@ export class PttTerminal {
       logger.debug({ step: decision.step }, "ptt step");
       this.send(decision.keys);
       state = decision.next;
+      lastStep = decision.step;
     }
     throw new PttError("Timeout", "too many login steps");
   }
@@ -608,6 +648,7 @@ export class PttTerminal {
     };
     const flow = { progress: "before_save" as MailProgress };
     let stage: MailStage = "start";
+    const answered: string[] = [];
     this.clear();
     try {
       if (input.recipient.length === 0) throw new PttError("NoSuchUser", "empty recipient");
@@ -617,7 +658,7 @@ export class PttTerminal {
           `mail:${current}`,
           (screen) => {
             if (current === "after_save" && isSendConfirmed(screen)) flow.progress = "confirmed";
-            const d = decideMail(current, screen, input, flow.progress === "confirmed");
+            const d = decideMail(current, screen, input, flow.progress === "confirmed", answered);
             return d.kind === "wait" ? undefined : d;
           },
           flow.progress === "confirmed" ? this.confirmedStepTimeoutMs : undefined,
@@ -627,6 +668,7 @@ export class PttTerminal {
         // Mark the save key as sent before writing it, so a failed write counts as unknown.
         if (decision.commit) flow.progress = "saving";
         this.send(decision.keys);
+        answered.push(decision.step);
         stage = decision.next;
       }
       if (stage !== "finished") throw new PttError("Timeout", "too many mail steps");
@@ -640,11 +682,14 @@ export class PttTerminal {
   }
 
   /**
-   * Leaves PTT politely (left arrow, G, y). Never throws; failures are logged.
+   * Leaves PTT politely (left arrow unless already on the main menu, then G, y). Never throws;
+   * failures are logged.
    */
   async logout(): Promise<void> {
     try {
-      this.send(key(KEY_LEFT));
+      // On the main menu a left arrow only moves the cursor and PTT redraws no menu text, so the
+      // wait below would never see the menu; answer the menu already on screen instead.
+      if (!MAIN_MENU.test(this.screen())) this.send(key(KEY_LEFT));
       let goodbyeSent = false;
       for (let i = 0; i < 6; i++) {
         const decision: Extract<LogoutDecision, { kind: "send" }> = await this.waitFor(
