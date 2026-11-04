@@ -17,6 +17,8 @@ import { maintenanceWorker } from "./modules/board/workers/maintenanceWorker";
 import { startScheduler, stopScheduler } from "./modules/board/workers/scheduler";
 import { updateWorker } from "./modules/board/workers/updateWorker";
 import { startBot, stopBot } from "./modules/broadcast/channels/telegram";
+import { recoverInFlight } from "./modules/mail/services/mailService";
+import { closeMailWorker, mailWorker } from "./modules/mail/workers/mailWorker";
 import { notifierWorker } from "./modules/notification/workers/notifierWorker";
 import { closeMatcherWorker, matcherWorker } from "./modules/subscription/workers/matcherWorker";
 import { seedArticleCache, syncSubscriptions } from "./modules/user/services/syncService";
@@ -36,6 +38,14 @@ async function bootstrap() {
   await syncSubscriptions();
   await seedArticleCache();
 
+  // The boot flush dropped every mail job: re-enqueue QUEUED rows and settle SENDING ones
+  // before any worker can pick up work. A failure here must not keep the service down.
+  try {
+    await recoverInFlight();
+  } catch (err) {
+    logger.error(`Mail recovery failed: ${(err as Error).message}`);
+  }
+
   // Workers were created with autorun:false so they don't start polling
   // before flushdb + sync land. Kick them off now that Redis is in a
   // consistent state. .run() returns a long-lived promise we don't await.
@@ -45,12 +55,13 @@ async function bootstrap() {
   void maintenanceWorker.run();
   void matcherWorker.run();
   void notifierWorker.run();
+  void mailWorker.run();
 
   await startScheduler();
   await startBot();
 
   logger.info(
-    "Workers started: dispatchWorker, crawlerWorker, updateWorker, maintenanceWorker, matcherWorker, notifierWorker",
+    "Workers started: dispatchWorker, crawlerWorker, updateWorker, maintenanceWorker, matcherWorker, notifierWorker, mailWorker",
   );
 
   const server = app.listen(config.port, () => {
@@ -71,6 +82,7 @@ async function bootstrap() {
     await maintenanceWorker.close();
     await closeMatcherWorker();
     await notifierWorker.close();
+    await closeMailWorker();
     logger.info("Workers stopped");
 
     await stopScheduler();

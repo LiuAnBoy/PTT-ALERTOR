@@ -17,7 +17,21 @@ app.use(
   }),
 );
 app.use(express.json());
-app.use(pinoHttp({ logger: baseLogger, autoLogging: { ignore: (req) => req.url === "/health" } }));
+// Request logs carry only id, method and path: never headers (the webhook secret travels in one)
+// and never the body (Telegram updates hold message text, PTT passwords included).
+app.use(
+  pinoHttp({
+    logger: baseLogger,
+    autoLogging: { ignore: (req) => req.url === "/health" },
+    serializers: {
+      req: (req: { id?: unknown; method?: string; url?: string }) => ({
+        id: req.id,
+        method: req.method,
+        url: req.url,
+      }),
+    },
+  }),
+);
 
 // Health check (GET — return data directly)
 app.get("/health", (_req, res) => {

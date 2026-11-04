@@ -73,3 +73,14 @@ export async function updateArticleDetail(code: string, detail: ArticleDetail): 
 
   return true;
 }
+
+/**
+ * Read the fields needed to quote an article in a mail.
+ * @param code - The article code (primary key).
+ * @returns The stored content (null until the detail is fetched) and link, or null when the row is gone.
+ */
+export async function getArticleForMail(
+  code: string,
+): Promise<{ content: string | null; link: string } | null> {
+  return prisma.article.findUnique({ where: { code }, select: { content: true, link: true } });
+}

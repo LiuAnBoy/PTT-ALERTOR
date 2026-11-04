@@ -112,7 +112,12 @@ Base image: `node:22-alpine`
 | `TELEGRAM_TOKEN` | Yes | — | Bot token from @BotFather |
 | `TELEGRAM_BOT_USERNAME` | Yes | — | Bot username |
 | `TELEGRAM_WEBHOOK_URL` | Yes | — | Public URL for webhook |
+| `TELEGRAM_WEBHOOK_SECRET` | No | — | Webhook secret (`openssl rand -hex 32`; only `A-Z a-z 0-9 _ -`, at most 256 characters, otherwise startup throws). When set, updates without the matching header are rejected. The PTT mail feature stays off unless it and `PTT_ENCRYPT_KEY` are both set |
+| `PTT_ENCRYPT_KEY` | No | — | Base64 of exactly 32 bytes (`openssl rand -base64 32`); encrypts stored PTT passwords with AES-256-GCM. Set but not 32 bytes → startup throws. Changing or losing it makes every stored password unreadable, so users must run `綁定PTT` again |
+| `MAIL_DAILY_LIMIT` | No | `20` | Mail taps each user may claim per day (Asia/Taipei) |
 | `ADMIN_TELEGRAM_ID` | No | — | Fill in your chat ID to receive FATAL/ERROR alerts |
+
+PTT 寄信功能的部署注意事項：`add_ptt_mail` migration 只新增（`ptt_accounts`、`mail_requests` 兩張表與 `Subscription` 兩個欄位），`./deploy.sh update` 偵測到 migration 變更會自動執行；回滾時對資料庫執行同目錄的 `down.sql`，並刪除 `_prisma_migrations` 中該筆紀錄。寄信功能另需 server 能以 WebSocket 連到 `wss://ws.ptt.cc/bbs/`。流程見 [mail-flow.md](mail-flow.md)。
 
 ## Graceful Shutdown
 

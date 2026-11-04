@@ -39,6 +39,7 @@
     "express": "^5.2.1",
     "grammy": "^1.40.0",
     "helmet": "^8.1.0",
+    "iconv-lite": "^0.7.2",
     "ioredis": "^5.9.3",
     "p-limit": "^7.3.0",
     "pino": "^10.3.1",
