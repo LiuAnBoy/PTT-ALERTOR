@@ -8,7 +8,7 @@
 
 | Type | Location | 命名 | 依賴 | 數量 |
 |------|----------|------|------|------|
-| Unit | `modules/*/tests/`、`core/tests/` | `*.unit.test.ts` | 全部 mock | 479（22 個檔案） |
+| Unit | `modules/*/tests/`、`core/tests/` | `*.unit.test.ts` | 全部 mock | 483（23 個檔案） |
 | Integration | `modules/*/tests/` | `*.test.ts`、`*.integration.test.ts` | 真實 DB/Redis/PTT | 7 個檔案 |
 
 ## Commands
@@ -74,6 +74,7 @@ import { myFunction } from "../services/myModule";
 | `crypto.unit.test.ts` | `core/tests/` | 5 |
 | `errorClassifier.unit.test.ts` | `core/tests/` | 25 |
 | `roundTracker.unit.test.ts` | `core/tests/` | 6 |
+| `startupLogger.unit.test.ts` | `core/tests/` | 4 |
 | `htmlFetcher.unit.test.ts` | `board/tests/` | 16 |
 | `detailFetcher.unit.test.ts` | `board/tests/` | 11 |
 | `articleCache.unit.test.ts` | `board/tests/` | 19 |
@@ -94,8 +95,9 @@ import { myFunction } from "../services/myModule";
 管理員告警相關測試的重點：
 
 - `config.unit.test.ts`：`buildNotifyConfig` 的預設 URL 與頻道、`SERVICE_KEY` 非空才啟用、key 與 URL 的 trim。
-- `adminNotifier.unit.test.ts`：Service Manager 請求的 URL、Authorization header 與完整 body（含首則告警去除 emoji 與 U+FE0F 後的全文）；路線選擇；非 2xx、`success: false`、無法解析、網路錯誤與逾時都退回直送 Telegram；送達後不重複送；任何情況都不丟例外；帶有 canary key 的錯誤訊息不會出現在任何 logger 呼叫。
+- `adminNotifier.unit.test.ts`：Service Manager 請求的 URL、Authorization header 與完整 body（含首則告警去除 emoji 與 U+FE0F 後的全文）；路線選擇；非 2xx、`success: false`、無法解析、網路錯誤與逾時都退回直送 Telegram；送達後不重複送；任何情況都不丟例外；key 不會出現在任何 logger 呼叫，以 `util.inspect` 檢查（Error 的 message 也看得到），包括伺服器把長得像錯誤代碼的 key 當成 `payload.code` 回傳時。
 - `errorLogger.unit.test.ts`：首則與 FATAL 為 `error`、進度為 `warning`、恢復為 `success`；只設定 Service Manager（`ADMIN_TELEGRAM_ID` 為空）時仍會告警。
+- `startupLogger.unit.test.ts`：`SERVICE_KEY` 與 `ADMIN_TELEGRAM_ID` 的四種組合下，啟動 log 的 `Route :` 行都寫出實際生效的路線，且不印出 key。
 
 寄信功能相關測試的重點：
 
