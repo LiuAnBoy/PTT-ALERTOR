@@ -190,6 +190,18 @@ describe("fallback to the direct chat", () => {
     expect(allLogged()).toContain("status=400 code=unrecognised");
   });
 
+  it("never logs a key that looks like a valid code when the server echoes it", async () => {
+    // A key of lowercase hex would pass any [a-z0-9_] shape check; only known codes are logged.
+    const codeShapedKey = "deadbeef0123456789abcdef";
+    cfg.notify = buildNotifyConfig({ SERVICE_KEY: codeShapedKey });
+    fetchMock.mockResolvedValue(
+      envelope(400, { success: false, payload: { code: codeShapedKey } }),
+    );
+    await sendAdminAlert("x", "error");
+    expect(allLogged()).not.toContain(codeShapedKey);
+    expect(allLogged()).toContain("status=400 code=unrecognised");
+  });
+
   it("never throws, even when both routes fail", async () => {
     fetchMock.mockRejectedValue(new Error("down"));
     mockSendAlert.mockRejectedValue(new Error("telegram down"));

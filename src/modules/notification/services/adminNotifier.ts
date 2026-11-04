@@ -16,6 +16,24 @@ interface Envelope {
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /**
+ * Error codes notify_service is known to return (its docs and source). Only these are logged;
+ * anything else is logged as "unrecognised", so a response cannot write an arbitrary string,
+ * such as an echoed key, into the log.
+ */
+const KNOWN_NOTIFY_CODES = new Set([
+  "bad_request",
+  "channel_not_found",
+  "forbidden",
+  "internal_error",
+  "invalid_param",
+  "invalid_service_key",
+  "message_not_owned",
+  "operator_only",
+  "rate_limited",
+  "unknown_method",
+]);
+
+/**
  * Remove the leading emoji (with a variation selector) and the whitespace after it.
  * notify_service prefixes its own level emoji, so the Service Manager route drops the text's own.
  * @param text - Alert text, possibly starting with an emoji.
@@ -65,7 +83,7 @@ async function sendViaServiceManager(text: string, level: AdminAlertLevel): Prom
     if (res.ok && envelope?.success === true) return true;
     const rawCode = envelope?.payload?.code;
     const code =
-      typeof rawCode === "string" && /^[a-z0-9_]{1,64}$/.test(rawCode) ? rawCode : "unrecognised";
+      typeof rawCode === "string" && KNOWN_NOTIFY_CODES.has(rawCode) ? rawCode : "unrecognised";
     logger.error(`Admin alert via Service Manager failed: status=${res.status} code=${code}`);
     return false;
   } catch (err) {

@@ -100,7 +100,7 @@ App db is configurable via `REDIS_DB` env var (default 0, validated 0-15). On st
 pnpm server              # Dev server (nodemon + tsx, hot reload)
 pnpm build               # TypeScript compile
 pnpm start               # Production start
-pnpm test:unit           # Unit tests only (*.unit.test.ts, ~478 cases)
+pnpm test:unit           # Unit tests only (*.unit.test.ts, ~479 cases)
 pnpm test:integration    # Integration tests (requires DB/Redis)
 pnpm test:cov            # Coverage report
 pnpm lint                # ESLint check

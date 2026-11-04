@@ -199,4 +199,4 @@ logError("ERROR", "NOTIFIER", `${channel.platform} 發送失敗`, {
 
 兩條路線都未設定時 `logError` 只寫入 DB。`sendAdminAlert` 不會丟出例外。Service Manager 逾時但其實已送達時，同一則告警可能在兩處各出現一次，這是為了不漏警報而接受的重複。
 
-Service Manager 路線失敗時只記錄 HTTP 狀態與錯誤代碼，或丟出的錯誤名稱。錯誤代碼取自回應 envelope 的 `payload.code`，只在它符合 `^[a-z0-9_]{1,64}$` 時原樣記錄，否則記為 `code=unrecognised`，所以回應內容無法把任意字串帶進 log。`SERVICE_KEY`、請求內容與完整錯誤物件都不進 log。
+Service Manager 路線失敗時只記錄 HTTP 狀態與錯誤代碼，或丟出的錯誤名稱。錯誤代碼取自回應 envelope 的 `payload.code`，只有 notify_service 文件與程式中已知的代碼（例如 `invalid_service_key`、`channel_not_found`、`invalid_param`、`forbidden`、`rate_limited`）會原樣記錄，其他一律記為 `code=unrecognised`；格式檢查擋不住長得像代碼的 key，所以採白名單。`SERVICE_KEY`、請求內容與完整錯誤物件都不進 log。
