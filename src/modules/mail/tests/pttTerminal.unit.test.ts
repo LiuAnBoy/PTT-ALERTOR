@@ -74,7 +74,7 @@ const LOGIN_REPLIES = [
   "\x1b[2J【主功能表】 (G)oodbye",
 ];
 const MAIL_REPLIES = [
-  "【電子郵件】",
+  "【私人信件區】",
   "請輸入使用者代號：",
   "主題：",
   "確定要儲存檔案嗎? (S)儲存 (A)放棄",
@@ -82,7 +82,12 @@ const MAIL_REPLIES = [
   "已順利寄出，是否自存底稿 (Y/N)? [N]",
   "請按任意鍵繼續",
 ];
-const LOGOUT_REPLIES = ["【主功能表】", "您確定要離開【 批踢踢實業坊 】嗎(Y/N)？[N]", null];
+const LOGOUT_REPLIES = [
+  "【主功能表】",
+  "您確定要離開【 批踢踢實業坊 】嗎(Y/N)？[N]",
+  "此次停留時間: 0 小時 0 分 [按任意鍵繼續]",
+  null,
+];
 
 async function loggedIn(replies: Array<string | string[] | null>) {
   const transport = new FakeTransport(replies);
@@ -181,7 +186,7 @@ describe("decideMail", () => {
   it("walks the mail steps in order", () => {
     const steps: Array<[Parameters<typeof decideMail>[0], string, string, string]> = [
       ["start", "", "M\r", "mail_menu"],
-      ["mail_menu", "【電子郵件】", "S\r", "recipient_prompt"],
+      ["mail_menu", "【私人信件區】", "S\r", "recipient_prompt"],
       ["recipient_prompt", "請輸入使用者代號：", "bob\r", "recipient_result"],
       ["recipient_result", "主題：", "subj\rbody\r\x18", "save_confirm"],
       ["save_confirm", "確定要儲存檔案嗎?", "s\r", "after_save"],
@@ -222,18 +227,23 @@ describe("decideMail", () => {
   });
 
   it("reports a missing recipient and waits on an unrelated screen", () => {
-    const d = decideMail("recipient_result", "【電子郵件】", input, false);
+    const d = decideMail("recipient_result", "【私人信件區】", input, false);
     expect((d as { error: PttError }).error.code).toBe("NoSuchUser");
     expect(decideMail("mail_menu", "loading", input, false).kind).toBe("wait");
   });
 });
 
 describe("decideLogout", () => {
-  it("presses G on the main menu, then confirms", () => {
-    expect(latin((decideLogout("【主功能表】", false) as { keys: Buffer }).keys)).toBe("G\r");
-    const confirm = decideLogout("您確定要離開【 批踢踢實業坊 】嗎(Y/N)？[N]", true);
-    expect(confirm).toMatchObject({ finished: true });
+  it("presses G on the main menu, confirms, then finishes on the farewell key", () => {
+    expect(latin((decideLogout("【主功能表】", "start") as { keys: Buffer }).keys)).toBe("G\r");
+    const confirm = decideLogout("您確定要離開【 批踢踢實業坊 】嗎(Y/N)？[N]", "goodbye");
+    expect(confirm).toMatchObject({ next: "confirmed", finished: false });
     expect(latin((confirm as { keys: Buffer }).keys)).toBe("y\r");
+    // PTT keeps the session on its farewell screen until a key is pressed.
+    const farewell = decideLogout("此次停留時間: 0 小時 0 分 [按任意鍵繼續]", "confirmed");
+    expect(farewell).toMatchObject({ finished: true });
+    expect(latin((farewell as { keys: Buffer }).keys)).toBe(" ");
+    expect(decideLogout("您確定要離開嗎(Y/N)？[N] y", "confirmed").kind).toBe("wait");
   });
 });
 
@@ -414,9 +424,9 @@ describe("PttTerminal.sendMail", () => {
   it("reports NoSuchUser as not_sent", async () => {
     const { transport, term } = await loggedIn([
       ...LOGIN_REPLIES,
-      "【電子郵件】",
+      "【私人信件區】",
       "請輸入使用者代號：",
-      "【電子郵件】",
+      "【私人信件區】",
     ]);
     const result = await term.sendMail(params);
     expect(result).toMatchObject({ outcome: "not_sent", errorCode: "NoSuchUser" });
@@ -484,33 +494,44 @@ describe("PttTerminal.sendMail", () => {
 });
 
 describe("PttTerminal.logout", () => {
-  const closeOnConfirm = (transport: FakeTransport) =>
+  /** Closes the socket when the given key is sent, as PTT does at the end of its logout. */
+  const closeOn = (transport: FakeTransport, closingKey: string) =>
     new Promise<void>((resolve) => {
       const send = transport.send.bind(transport);
       transport.send = (d) => {
         send(d);
-        if (latin(d) === "y\r") setImmediate(() => transport.onClose?.());
-        if (latin(d) === "y\r") resolve();
+        if (latin(d) !== closingKey) return;
+        setImmediate(() => transport.onClose?.());
+        resolve();
       };
     });
 
-  it("presses G straight from the main menu, confirms with y, then waits for the close", async () => {
-    // On the main menu a left arrow only moves the cursor, so the menu text never comes back.
+  it("presses G from the main menu, confirms, and presses a key on the farewell screen", async () => {
+    // On the main menu a left arrow only moves the cursor, so the menu text never comes back;
+    // and PTT keeps the session on its farewell screen until a key is pressed.
     const { transport, term } = await loggedIn([...LOGIN_REPLIES, ...LOGOUT_REPLIES.slice(1)]);
-    const closing = closeOnConfirm(transport);
+    const closing = closeOn(transport, " ");
     await term.logout();
     await closing;
-    expect(transport.sent.slice(4).map(latin)).toEqual(["G\r", "y\r"]);
+    expect(transport.sent.slice(4).map(latin)).toEqual(["G\r", "y\r", " "]);
   });
 
   it("goes back to the main menu with a left arrow from another screen", async () => {
     const transport = new FakeTransport(LOGOUT_REPLIES);
     const term = new PttTerminal(transport, OPTS);
-    transport.emit("【電子郵件】");
-    const closing = closeOnConfirm(transport);
+    transport.emit("【私人信件區】");
+    const closing = closeOn(transport, " ");
     await term.logout();
     await closing;
-    expect(transport.sent.map(latin)).toEqual(["\x1b[D", "G\r", "y\r"]);
+    expect(transport.sent.map(latin)).toEqual(["\x1b[D", "G\r", "y\r", " "]);
+  });
+
+  it("treats a close right after y as a finished logout", async () => {
+    const { transport, term } = await loggedIn([...LOGIN_REPLIES, ...LOGOUT_REPLIES.slice(1, 2)]);
+    const closing = closeOn(transport, "y\r");
+    await term.logout();
+    await closing;
+    expect(transport.sent.slice(4).map(latin)).toEqual(["G\r", "y\r"]);
   });
 
   it("does not throw when the screen never responds", async () => {

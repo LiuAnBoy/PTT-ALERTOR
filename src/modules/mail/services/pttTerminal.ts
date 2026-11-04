@@ -211,6 +211,8 @@ export type LoginDecision =
   | { kind: "send"; step: string; keys: Buffer; next: LoginState };
 
 const MAIN_MENU = /【主功能表】|\(G\)oodbye/;
+/** The mail menu: live PTT titles it 【私人信件區】; older layouts used 【電子郵件】. */
+const MAIL_MENU = /【私人信件區】|【電子郵件】/;
 const RESERVED_IDS = new Set(["guest", "new"]);
 
 /**
@@ -358,7 +360,7 @@ export function decideMail(
     case "start":
       return send("open-mail", "M\r", "mail_menu");
     case "mail_menu":
-      return /【電子郵件】/.test(screen) ? send("open-compose", "S\r", "recipient_prompt") : wait();
+      return MAIL_MENU.test(screen) ? send("open-compose", "S\r", "recipient_prompt") : wait();
     case "recipient_prompt":
       return /使用者代號/.test(screen)
         ? send(
@@ -375,7 +377,7 @@ export function decideMail(
           "save_confirm",
         );
       }
-      if (/【電子郵件】/.test(screen)) {
+      if (MAIL_MENU.test(screen)) {
         return { kind: "error", error: new PttError("NoSuchUser") };
       }
       return wait();
@@ -407,29 +409,44 @@ function wait(): MailDecision {
   return { kind: "wait" };
 }
 
+export type LogoutPhase = "start" | "goodbye" | "confirmed";
+
 export type LogoutDecision =
   | { kind: "wait" }
-  | { kind: "send"; step: string; keys: Buffer; goodbyeSent: boolean; finished: boolean };
+  | { kind: "send"; step: string; keys: Buffer; next: LogoutPhase; finished: boolean };
 
 /**
  * Decides the next logout action: reach the main menu, press G, confirm with y.
+ * After `y` PTT shows its farewell screen and keeps the session until a key is pressed there,
+ * so that key is the step that finishes the logout.
  * @param screen - Decoded screen text with ANSI removed.
- * @param goodbyeSent - Whether G was already pressed.
- * @returns Wait or the keys to send.
+ * @param phase - `start` before G, `goodbye` after G, `confirmed` after y.
+ * @returns Wait or the keys to send and the next phase.
  */
-export function decideLogout(screen: string, goodbyeSent: boolean): LogoutDecision {
-  const send = (step: string, keys: string, sent: boolean, finished = false): LogoutDecision => ({
-    kind: "send",
+export function decideLogout(screen: string, phase: LogoutPhase): LogoutDecision {
+  const send = (step: string, keys: string, next: LogoutPhase, finished = false) => ({
+    kind: "send" as const,
     step,
     keys: key(keys),
-    goodbyeSent: sent,
+    next,
     finished,
   });
   return (
     pickLatest<LogoutDecision>(screen, [
-      { pattern: /確定要離開/, make: () => send("confirm-goodbye", "y\r", true, true) },
-      { pattern: MAIN_MENU, enabled: !goodbyeSent, make: () => send("goodbye", "G\r", true) },
-      { pattern: /任意鍵/, make: () => send("any-key", " ", goodbyeSent) },
+      {
+        pattern: /確定要離開/,
+        enabled: phase !== "confirmed",
+        make: () => send("confirm-goodbye", "y\r", "confirmed"),
+      },
+      {
+        pattern: MAIN_MENU,
+        enabled: phase === "start",
+        make: () => send("goodbye", "G\r", "goodbye"),
+      },
+      {
+        pattern: /任意鍵/,
+        make: () => send("any-key", " ", phase, phase === "confirmed"),
+      },
     ]) ?? { kind: "wait" }
   );
 }
@@ -682,20 +699,21 @@ export class PttTerminal {
   }
 
   /**
-   * Leaves PTT politely (left arrow unless already on the main menu, then G, y). Never throws;
-   * failures are logged.
+   * Leaves PTT politely (left arrow unless already on the main menu, then G, y, and a key on the
+   * farewell screen). Never throws; failures are logged.
    */
   async logout(): Promise<void> {
+    let phase: LogoutPhase = "start";
     try {
       // On the main menu a left arrow only moves the cursor and PTT redraws no menu text, so the
       // wait below would never see the menu; answer the menu already on screen instead.
       if (!MAIN_MENU.test(this.screen())) this.send(key(KEY_LEFT));
-      let goodbyeSent = false;
       for (let i = 0; i < 6; i++) {
+        const current = phase;
         const decision: Extract<LogoutDecision, { kind: "send" }> = await this.waitFor(
           "logout",
           (screen) => {
-            const d = decideLogout(screen, goodbyeSent);
+            const d = decideLogout(screen, current);
             return d.kind === "wait" ? undefined : d;
           },
           this.logoutStepTimeoutMs,
@@ -703,13 +721,15 @@ export class PttTerminal {
         );
         logger.debug({ step: decision.step }, "ptt step");
         this.send(decision.keys);
-        goodbyeSent = decision.goodbyeSent;
+        phase = decision.next;
         if (decision.finished) {
           await this.waitClosed(this.closeGraceMs);
           return;
         }
       }
     } catch (error) {
+      // After y the server may close the session before the farewell key; that is a logout.
+      if (phase === "confirmed" && this.closed) return;
       logger.warn({ errorCode: toPttError(error).code }, "ptt logout failed");
     }
   }
