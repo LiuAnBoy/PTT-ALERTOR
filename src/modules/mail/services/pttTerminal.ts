@@ -210,9 +210,12 @@ export type LoginDecision =
   | { kind: "error"; error: PttError }
   | { kind: "send"; step: string; keys: Buffer; next: LoginState };
 
-const MAIN_MENU = /【主功能表】|\(G\)oodbye/;
-/** The mail menu: live PTT titles it 【私人信件區】; older layouts used 【電子郵件】. */
-const MAIL_MENU = /【私人信件區】|【電子郵件】/;
+// PTT redraws only the cells that changed, so a title can arrive without its opening 【 (left on
+// screen by the previous menu). The patterns therefore never require it. The main menu's item
+// label 【 私人信件區 】 has spaces, so it does not match the mail menu's title.
+const MAIN_MENU = /主功能表】|\(G\)oodbye/;
+/** The mail menu: live PTT titles it 【私人信件區】 and lists 站內寄信; older layouts used 【電子郵件】. */
+const MAIL_MENU = /私人信件區】|站內寄信|【電子郵件】/;
 const RESERVED_IDS = new Set(["guest", "new"]);
 
 /**
