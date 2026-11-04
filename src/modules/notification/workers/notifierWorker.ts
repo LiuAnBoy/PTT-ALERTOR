@@ -3,6 +3,7 @@ import { Worker } from "bullmq";
 import { createLogger } from "../../../core/logger";
 import { bullmqConnection } from "../../../core/queue";
 import type { NotificationPayload } from "../../broadcast/types";
+import { reportNotificationLost } from "../../user/services/errorLogger";
 import { sendNotification } from "../services/notifierService";
 
 const logger = createLogger("NOTIFIER");
@@ -35,4 +36,9 @@ notifierWorker.on("failed", (job, err) => {
   const attempt = job?.attemptsMade ?? 0;
   const maxAttempts = job?.opts?.attempts ?? 1;
   logger.error(`Job ${job?.id} failed (${attempt}/${maxAttempts}): ${err.message}`);
+
+  if (job && attempt >= maxAttempts) {
+    const { board, keyword } = job.data as NotificationPayload;
+    reportNotificationLost(board, keyword).catch(() => {});
+  }
 });

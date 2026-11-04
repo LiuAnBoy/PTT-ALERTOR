@@ -1,5 +1,7 @@
 import { alertAggregator } from "../../../core/alertAggregator";
 import { classifyError } from "../../../core/errorClassifier";
+import type { LostNotificationReport } from "../../../core/lostNotificationTracker";
+import { lostNotifications } from "../../../core/lostNotificationTracker";
 import { getPrisma } from "../../../core/prisma";
 import { isAdminRouteConfigured, sendAdminAlert } from "../../notification/services/adminNotifier";
 
@@ -39,7 +41,8 @@ export async function logError(
 
 /**
  * Close the current alert round and send whatever it calls for: the first alert, the recovery
- * report, or a throttled progress alert. Called once per dispatch tick.
+ * report, or a throttled progress alert. Also sends lost notifications whose window has passed,
+ * so a count is not hidden when no further loss follows. Called once per dispatch tick.
  * @param circuitClosed - Whether the circuit breaker is CLOSED.
  */
 export async function closeAlertRound(circuitClosed: boolean): Promise<void> {
@@ -51,6 +54,35 @@ export async function closeAlertRound(circuitClosed: boolean): Promise<void> {
   } else {
     await sendProgressAlert();
   }
+
+  const lost = lostNotifications.takeDue(new Date());
+  if (lost) await sendLostNotificationAlert(lost);
+}
+
+/**
+ * Report a notification whose retries ran out, so it never reached the user. The first loss
+ * alerts at once and later ones are throttled; see {@link lostNotifications}. The alert carries
+ * the keyword and board only, never the raw error, which could quote a request or a token.
+ * @param board - The article's board.
+ * @param keyword - The matched keyword.
+ */
+export async function reportNotificationLost(board: string, keyword: string): Promise<void> {
+  const target = `${keyword}@${board}`;
+  const due = lostNotifications.record(target, new Date());
+  if (due) await sendLostNotificationAlert(due);
+  await logError("ERROR", "NOTIFIER", `Notification lost: ${target}`);
+}
+
+/**
+ * Send one lost-notification alert.
+ * @param report - The losses to report.
+ */
+async function sendLostNotificationAlert(report: LostNotificationReport): Promise<void> {
+  const detail =
+    report.count === 1
+      ? `重試用盡，沒有送出：${report.latest}`
+      : `重試用盡，共 ${report.count} 則沒有送出，最後一則：${report.latest}`;
+  await sendAdminAlert(`⚠️ 推播通知遺失\n${detail}`, "error");
 }
 
 /**

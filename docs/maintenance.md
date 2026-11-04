@@ -116,7 +116,7 @@ ZREMRANGEBYSCORE active:articles -inf {cutoff_timestamp}
 
 **訊息類型**：首次告警（⚠️）、進度告警（⏳，每 30 分節流）、恢復報告（✅，含問題分布）。恢復報告務必在 `recover()` 清除計數器**之前**產生。
 
-**只會零星發生的錯誤不會告警**：`updateWorker` 每 15 分鐘才跑一次，通知發送失敗也只在有通知時才發生，這類錯誤湊不滿連續 5 輪，只會留在 `crawler_logs`，要用 `/errors` 查看。FATAL 不受影響，一律立即推送。
+**只會零星發生的錯誤不會觸發這個規則**：`updateWorker` 每 15 分鐘才跑一次，通知發送失敗也只在有通知時才發生，這類錯誤湊不滿連續 5 輪，只會留在 `crawler_logs`，要用 `/errors` 查看。通知重試用盡另有告警，見 Worker 失敗告警；FATAL 一律立即推送。
 
 實作於 `src/core/alertAggregator.ts`（in-memory singleton），由 `errorLogger.ts` 的 `logError()` 累計、`closeAlertRound()` 結算。
 
@@ -124,7 +124,17 @@ ZREMRANGEBYSCORE active:articles -inf {cutoff_timestamp}
 
 ### Worker 失敗告警
 
-所有 BullMQ worker（crawlerWorker、dispatchWorker、updateWorker）在 job 用盡所有重試時，會呼叫 `logError("ERROR", ...)` 將失敗記錄寫入 DB 並觸發告警系統。
+crawlerWorker、dispatchWorker、updateWorker 在 job 用盡所有重試時，會呼叫 `logError("ERROR", ...)` 將失敗記錄寫入 DB 並計入告警聚合。
+
+notifierWorker 的 job 用盡重試代表這則通知沒有送到使用者，它呼叫 `reportNotificationLost(board, keyword)`，不等五輪：
+
+| 事件 | 行為 |
+|------|------|
+| 通知重試用盡 | 寫入 DB；距上次遺失告警已滿 30 分鐘（或從未發過）時立即推送，內容含 `keyword@board`，level 為 `error` |
+| 30 分鐘內再有通知遺失 | 只累計數量，不另外推送 |
+| 窗口結束時有累計 | 下一次 `closeAlertRound()` 推送「共 N 則沒有送出」 |
+
+重試後成功、以及使用者封鎖 bot 這類永久錯誤（不重試，job 不算失敗）都不會觸發。告警只帶關鍵字與看板，不帶原始錯誤訊息。節流狀態在 `src/core/lostNotificationTracker.ts`（in-memory），重啟後歸零。開機 `flushdb` 清掉的排隊中通知不會經過這裡，因此不會告警。
 
 ### Admin Commands
 

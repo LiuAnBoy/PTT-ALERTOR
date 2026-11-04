@@ -169,7 +169,7 @@ prisma.user.findUnique({
 
 | 層級 | 情境 | 行為 |
 |------|------|------|
-| 工作器 (Worker) | 任務處理失敗 | 使用 BullMQ 指數退避重試，最多 3 次 |
+| 工作器 (Worker) | 任務處理失敗 | 使用 BullMQ 指數退避重試，最多 3 次；用盡時送通知遺失告警 |
 | 服務 (Service) | 單一頻道 `sendMessage` 失敗 | 將錯誤記錄至 DB (logError) 並向管理員發送告警，隨後繼續其他頻道 |
 | 服務 (Service) | 全部頻道失敗 | 回傳 false |
 | 服務 (Service) | `offerMail` 失敗 | 記錄警告，通知照常發送、不帶按鈕 |
@@ -192,6 +192,7 @@ logError("ERROR", "NOTIFIER", `${channel.platform} 發送失敗`, {
 `errorLogger.ts` 的所有告警都經 `notification/services/adminNotifier.ts` 的 `sendAdminAlert(text, level)` 發送：
 - **FATAL**: 立即發送，level 為 `error`
 - **ERROR**: 由 AlertAggregator 聚合，連續 5 輪（每輪 1 分鐘）異常才送首則告警（`error`），之後每 30 分鐘一則進度告警（`warning`），連續 3 輪正常時送恢復報告（`success`），見 [maintenance.md](maintenance.md)
+- **通知遺失**: 通知重試用盡時立即發送（`error`），每 30 分鐘最多一則，期間的遺失累計到下一則，見 [maintenance.md](maintenance.md)
 
 發送路線：
 1. 設定 `SERVICE_KEY` 時，`POST {NOTIFY_SERVICE_URL}/v1/notify/telegram` 到 Service Manager 的管理頻道（預設 `system_admin`），header 為 `Authorization: Bearer <SERVICE_KEY>`，body 為 `{ channel, method: "sendMessage", params: { text, parse_mode: "none" }, level }`。notify_service 會自行加上等級 emoji 與服務名稱，所以這條路線送出前會移除告警文字開頭的 emoji；請求逾時為 15 秒。只有 HTTP 2xx 且回應 envelope 的 `success` 為 `true` 才算送達。
