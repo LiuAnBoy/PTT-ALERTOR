@@ -222,6 +222,21 @@ describe("secret handling", () => {
     expect(allLogged()).not.toContain(CANARY);
     expect(mockLogger.error).toHaveBeenCalled();
   });
+
+  it("logs an unknown error name as UnknownError, so a name carrying the key is not logged", async () => {
+    const err = new Error("x");
+    err.name = CANARY;
+    fetchMock.mockRejectedValue(err);
+    await sendAdminAlert("x", "error");
+    expect(allLogged()).not.toContain(CANARY);
+    expect(allLogged()).toContain("failed: UnknownError");
+  });
+
+  it("does not throw when the direct route rejects with a non-Error value", async () => {
+    cfg.notify = buildNotifyConfig({});
+    mockSendAlert.mockRejectedValue(null);
+    await expect(sendAdminAlert("x", "error")).resolves.toBeUndefined();
+  });
 });
 
 describe("isAdminRouteConfigured", () => {

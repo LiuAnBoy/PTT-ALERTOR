@@ -33,6 +33,9 @@ const KNOWN_NOTIFY_CODES = new Set([
   "unknown_method",
 ]);
 
+/** Error names fetch and AbortSignal.timeout raise. Any other name is logged as "UnknownError". */
+const KNOWN_FETCH_ERRORS = new Set(["AbortError", "TimeoutError", "TypeError"]);
+
 /**
  * Remove the leading emoji (with a variation selector) and the whitespace after it.
  * notify_service prefixes its own level emoji, so the Service Manager route drops the text's own.
@@ -87,7 +90,8 @@ async function sendViaServiceManager(text: string, level: AdminAlertLevel): Prom
     logger.error(`Admin alert via Service Manager failed: status=${res.status} code=${code}`);
     return false;
   } catch (err) {
-    const name = err instanceof Error ? err.name : "UnknownError";
+    const name =
+      err instanceof Error && KNOWN_FETCH_ERRORS.has(err.name) ? err.name : "UnknownError";
     logger.error(`Admin alert via Service Manager failed: ${name}`);
     return false;
   }
@@ -110,6 +114,6 @@ export async function sendAdminAlert(text: string, level: AdminAlertLevel): Prom
   try {
     await getAdapter("TELEGRAM").sendAlert(chatId, text);
   } catch (err) {
-    logger.error(`Failed to send admin alert: ${(err as Error).message}`);
+    logger.error(`Failed to send admin alert: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

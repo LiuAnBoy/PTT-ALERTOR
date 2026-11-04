@@ -8,7 +8,7 @@
 
 | Type | Location | 命名 | 依賴 | 數量 |
 |------|----------|------|------|------|
-| Unit | `modules/*/tests/`、`core/tests/` | `*.unit.test.ts` | 全部 mock | 483（23 個檔案） |
+| Unit | `modules/*/tests/`、`core/tests/` | `*.unit.test.ts` | 全部 mock | 485（23 個檔案） |
 | Integration | `modules/*/tests/` | `*.test.ts`、`*.integration.test.ts` | 真實 DB/Redis/PTT | 7 個檔案 |
 
 ## Commands
@@ -83,7 +83,7 @@ import { myFunction } from "../services/myModule";
 | `regexCache.unit.test.ts` | `subscription/tests/` | 8 |
 | `matcherService.unit.test.ts` | `subscription/tests/` | 16 |
 | `notifierService.unit.test.ts` | `notification/tests/` | 20 |
-| `adminNotifier.unit.test.ts` | `notification/tests/` | 20 |
+| `adminNotifier.unit.test.ts` | `notification/tests/` | 22 |
 | `errorLogger.unit.test.ts` | `user/tests/` | 15 |
 | `syncService.unit.test.ts` | `user/tests/` | 12 |
 | `commandHandler.unit.test.ts` | `broadcast/tests/` | 79 |

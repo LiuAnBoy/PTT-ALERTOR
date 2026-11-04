@@ -197,6 +197,6 @@ logError("ERROR", "NOTIFIER", `${channel.platform} 發送失敗`, {
 1. 設定 `SERVICE_KEY` 時，`POST {NOTIFY_SERVICE_URL}/v1/notify/telegram` 到 Service Manager 的管理頻道（預設 `system_admin`），header 為 `Authorization: Bearer <SERVICE_KEY>`，body 為 `{ channel, method: "sendMessage", params: { text, parse_mode: "none" }, level }`。notify_service 會自行加上等級 emoji 與服務名稱，所以這條路線送出前會移除告警文字開頭的 emoji；請求逾時為 15 秒。只有 HTTP 2xx 且回應 envelope 的 `success` 為 `true` 才算送達。
 2. 未設定 `SERVICE_KEY`，或上一條路線沒有送達（非 2xx、`success: false`、無法解析、網路錯誤、逾時），且設定了 `ADMIN_TELEGRAM_ID` 時，經 `getAdapter("TELEGRAM").sendAlert()` 直送該聊天室，文字維持原樣。
 
-兩條路線都未設定時 `logError` 只寫入 DB。`sendAdminAlert` 不會丟出例外。Service Manager 逾時但其實已送達時，同一則告警可能在兩處各出現一次，這是為了不漏警報而接受的重複。
+兩條路線都未設定時 `logError` 只寫入 DB。`sendAdminAlert` 不會丟出例外，連拒絕值不是 Error 時也一樣。Service Manager 逾時但其實已送達時，同一則告警可能在兩處各出現一次，這是為了不漏警報而接受的重複。
 
-Service Manager 路線失敗時只記錄 HTTP 狀態與錯誤代碼，或丟出的錯誤名稱。錯誤代碼取自回應 envelope 的 `payload.code`，只有 notify_service 文件與程式中已知的代碼（例如 `invalid_service_key`、`channel_not_found`、`invalid_param`、`forbidden`、`rate_limited`）會原樣記錄，其他一律記為 `code=unrecognised`；格式檢查擋不住長得像代碼的 key，所以採白名單。`SERVICE_KEY`、請求內容與完整錯誤物件都不進 log。
+Service Manager 路線失敗時只記錄 HTTP 狀態與錯誤代碼，或丟出的錯誤名稱，兩者都採白名單：錯誤代碼取自回應 envelope 的 `payload.code`，只有 notify_service 文件與程式中已知的代碼（例如 `invalid_service_key`、`channel_not_found`、`invalid_param`、`forbidden`、`rate_limited`）會原樣記錄，其他一律記為 `code=unrecognised`；錯誤名稱只記 fetch 會丟出的 `AbortError`、`TimeoutError`、`TypeError`，其他記為 `UnknownError`。格式檢查擋不住長得像代碼的 key，所以採白名單。`SERVICE_KEY`、請求內容與完整錯誤物件都不進 log。
