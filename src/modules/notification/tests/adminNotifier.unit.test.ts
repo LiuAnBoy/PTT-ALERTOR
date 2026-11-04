@@ -38,6 +38,8 @@ jest.mock("../../../core/config", () => {
   };
 });
 
+import { inspect } from "node:util";
+
 import { alertAggregator } from "../../../core/alertAggregator";
 import type * as ConfigModule from "../../../core/config";
 import { buildNotifyConfig, config } from "../../../core/config";
@@ -54,9 +56,15 @@ function envelope(status: number, body: unknown): Response {
   return new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
 }
 
+/**
+ * Everything passed to the logger, rendered with util.inspect so an Error's non-enumerable
+ * message and stack are included (JSON.stringify would render an Error as {}).
+ * @returns The rendered logger calls.
+ */
 function allLogged(): string {
-  return JSON.stringify(
+  return inspect(
     [mockLogger.debug, mockLogger.info, mockLogger.warn, mockLogger.error].map((m) => m.mock.calls),
+    { depth: null, showHidden: true },
   );
 }
 

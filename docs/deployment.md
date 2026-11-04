@@ -122,7 +122,11 @@ Base image: `node:22-alpine`
 
 PTT 寄信功能的部署注意事項：`add_ptt_mail` migration 只新增（`ptt_accounts`、`mail_requests` 兩張表與 `Subscription` 兩個欄位），`./deploy.sh update` 偵測到 migration 變更會自動執行；回滾時對資料庫執行同目錄的 `down.sql`，並刪除 `_prisma_migrations` 中該筆紀錄。寄信功能另需 server 能以 WebSocket 連到 `wss://ws.ptt.cc/bbs/`。流程見 [mail-flow.md](mail-flow.md)。
 
-管理員告警的部署注意事項：設定 `SERVICE_KEY` 前，需在 Service Manager 後台為 `ptt_alertor` 啟用 `uses_notify` 與 `admin_notify_enabled`。App 容器以 `network_mode: host` 執行，從主機網路連 `http://127.0.0.1:5000`，因此依賴 notify_service 發布 `127.0.0.1:5000`（可用 `docker port notify_service` 確認）且 compose 保持 `network_mode: host`；任一項改變時告警會退回直送 `ADMIN_TELEGRAM_ID`，並需更新 `NOTIFY_SERVICE_URL`。未設定 `SERVICE_KEY` 時行為與先前相同。
+管理員告警的部署注意事項：
+
+- 設定 `SERVICE_KEY` 前，需在 Service Manager 後台為 `ptt_alertor` 啟用 `uses_notify` 與 `admin_notify_enabled`。
+- App 容器以 `network_mode: host` 執行，從主機網路連 `http://127.0.0.1:5000`，因此依賴 notify_service 發布 `127.0.0.1:5000`（可用 `docker port notify_service` 確認）且 compose 保持 `network_mode: host`；任一項改變時告警會退回直送 `ADMIN_TELEGRAM_ID`，並需更新 `NOTIFY_SERVICE_URL`。
+- 未設定 `SERVICE_KEY` 時，告警直送 `ADMIN_TELEGRAM_ID`；兩者都未設定時，告警只寫入資料庫。啟動 log 的 `--- Admin alerts ---` 區塊會寫出目前生效的路線。
 
 ## Graceful Shutdown
 

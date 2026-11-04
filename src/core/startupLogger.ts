@@ -31,11 +31,19 @@ export class StartupLogger {
     logger.info(`Admin Chat   : ${config.telegram.adminChatId || "(not set)"}`);
 
     logger.info("--- Admin alerts ---");
-    logger.info(
-      config.notify.enabled
-        ? `Route : Service Manager (channel ${config.notify.adminChannel}), fallback to Admin Chat`
-        : "Route : Admin Chat (direct Telegram)",
-    );
+    const hasAdminChat = Boolean(config.telegram.adminChatId);
+    if (config.notify.enabled) {
+      logger.info(
+        `Route : Service Manager (channel ${config.notify.adminChannel}), ` +
+          (hasAdminChat ? "fallback to Admin Chat" : "no fallback (Admin Chat not set)"),
+      );
+    } else {
+      logger.info(
+        hasAdminChat
+          ? "Route : Admin Chat (direct Telegram)"
+          : "Route : none (alerts are only written to the database)",
+      );
+    }
 
     logger.info("=================================");
   }
