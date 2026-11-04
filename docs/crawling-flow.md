@@ -179,8 +179,8 @@ dispatchCrawlerJobs()
                     ▼
             roundTracker.checkRoundComplete()
                     │
-                    ├── 全滅 → circuitBreaker OPEN + 首則告警
-                    └── 有成功 → 保持/恢復 CLOSED + 恢復通知
+                    ├── 全滅 → circuitBreaker OPEN
+                    └── 有成功 → 保持/恢復 CLOSED
 ```
 
 相關模組：

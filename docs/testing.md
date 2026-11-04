@@ -8,7 +8,7 @@
 
 | Type | Location | 命名 | 依賴 | 數量 |
 |------|----------|------|------|------|
-| Unit | `modules/*/tests/`、`core/tests/` | `*.unit.test.ts` | 全部 mock | 486（23 個檔案） |
+| Unit | `modules/*/tests/`、`core/tests/` | `*.unit.test.ts` | 全部 mock | 500（23 個檔案） |
 | Integration | `modules/*/tests/` | `*.test.ts`、`*.integration.test.ts` | 真實 DB/Redis/PTT | 7 個檔案 |
 
 ## Commands
@@ -68,7 +68,7 @@ import { myFunction } from "../services/myModule";
 
 | File | Location | Cases |
 |------|----------|-------|
-| `alertAggregator.unit.test.ts` | `core/tests/` | 23 |
+| `alertAggregator.unit.test.ts` | `core/tests/` | 31 |
 | `circuitBreaker.unit.test.ts` | `core/tests/` | 10 |
 | `config.unit.test.ts` | `core/tests/` | 8 |
 | `crypto.unit.test.ts` | `core/tests/` | 5 |
@@ -78,25 +78,32 @@ import { myFunction } from "../services/myModule";
 | `htmlFetcher.unit.test.ts` | `board/tests/` | 16 |
 | `detailFetcher.unit.test.ts` | `board/tests/` | 11 |
 | `articleCache.unit.test.ts` | `board/tests/` | 19 |
-| `crawlerService.unit.test.ts` | `board/tests/` | 8 |
+| `crawlerService.unit.test.ts` | `board/tests/` | 10 |
 | `scheduler.unit.test.ts` | `board/tests/` | 5 |
 | `regexCache.unit.test.ts` | `subscription/tests/` | 8 |
 | `matcherService.unit.test.ts` | `subscription/tests/` | 16 |
 | `notifierService.unit.test.ts` | `notification/tests/` | 20 |
 | `adminNotifier.unit.test.ts` | `notification/tests/` | 23 |
-| `errorLogger.unit.test.ts` | `user/tests/` | 15 |
-| `syncService.unit.test.ts` | `user/tests/` | 12 |
+| `errorLogger.unit.test.ts` | `user/tests/` | 18 |
+| `syncService.unit.test.ts` | `user/tests/` | 13 |
 | `commandHandler.unit.test.ts` | `broadcast/tests/` | 79 |
 | `telegram.unit.test.ts` | `broadcast/tests/` | 42 |
 | `mailService.unit.test.ts` | `mail/tests/` | 50 |
 | `pttTerminal.unit.test.ts` | `mail/tests/` | 75 |
 | `loginGate.unit.test.ts` | `mail/tests/` | 5 |
 
+重啟不重複推播相關測試的重點：
+
+- `syncService.unit.test.ts`：`seedArticleCache` 的時間基準取各看板歷來最新的文章，24 小時內沒有文章的冷門看板仍有基準；`active:articles` 只收 24 小時內的文章。
+- `crawlerService.unit.test.ts`：沒有基準的看板照常儲存與快取但不派發比對任務；`seedBoardBaseline` 儲存並快取頁面且不推播。
+
 管理員告警相關測試的重點：
 
+- `alertAggregator.unit.test.ts`：連續第 5 個異常輪才告警、未滿 5 輪出現正常輪就清除累計、一輪多筆錯誤只算一輪、circuit 不是 CLOSED 的一輪算異常、連續 3 個正常輪才恢復、恢復中再失敗要重算。
 - `config.unit.test.ts`：`buildNotifyConfig` 的預設 URL 與頻道、`SERVICE_KEY` 非空才啟用、key 與 URL 的 trim。
 - `adminNotifier.unit.test.ts`：Service Manager 請求的 URL、Authorization header 與完整 body（含首則告警去除 emoji 與 U+FE0F 後的全文）；路線選擇；非 2xx、`success: false`、無法解析、網路錯誤與逾時都退回直送 Telegram；送達後不重複送；任何情況都不丟例外；key 不會出現在任何 logger 呼叫，以 `util.inspect` 檢查（Error 的 message 也看得到），包括伺服器把長得像錯誤代碼的 key 當成 `payload.code` 回傳時。
-- `errorLogger.unit.test.ts`：首則與 FATAL 為 `error`、進度為 `warning`、恢復為 `success`；只設定 Service Manager（`ADMIN_TELEGRAM_ID` 為空）時仍會告警。
+- `errorLogger.unit.test.ts`：單筆 ERROR 不推送、FATAL 立即推送；`closeAlertRound` 在第 5 輪送一則首則告警、未滿 5 輪不送、連續 3 個正常輪送一則恢復報告；首則與 FATAL 為 `error`、進度為 `warning`、恢復為 `success`；只設定 Service Manager（`ADMIN_TELEGRAM_ID` 為空）時仍會告警。
+- `scheduler.unit.test.ts`：每次 dispatch 都先結算告警輪，即使讀取看板失敗或沒有看板；熔斷時該輪不算正常。
 - `startupLogger.unit.test.ts`：`SERVICE_KEY` 與 `ADMIN_TELEGRAM_ID` 的四種組合下，啟動 log 的 `Route :` 行都寫出實際生效的路線，且不印出 key。
 
 寄信功能相關測試的重點：

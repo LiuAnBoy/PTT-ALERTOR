@@ -11,7 +11,7 @@
 - **看板熱門關鍵字** — `熱門 [看板]` 查詢該看板被訂閱的關鍵字排行
 - **一鍵寄信給作者** — 通知上的按鈕用你綁定的 PTT 副帳號寄站內信給文章作者（選用，見 [PTT 寄信功能與帳密聲明](#ptt-寄信功能與帳密聲明)）
 - **自動清理** — 過期文章和 log 自動清除
-- **錯誤告警** — FATAL/ERROR 自動推送給 admin，可透過 `/errors` 查看。設定 `SERVICE_KEY` 時告警送到 Service Manager 的 `system_admin` 管理頻道，未設定或該次發送失敗時改送 `ADMIN_TELEGRAM_ID` 的 Telegram 聊天室
+- **錯誤告警** — FATAL 立即推送、ERROR 連續 5 輪才推送給 admin，可透過 `/errors` 查看。設定 `SERVICE_KEY` 時告警送到 Service Manager 的 `system_admin` 管理頻道，未設定或該次發送失敗時改送 `ADMIN_TELEGRAM_ID` 的 Telegram 聊天室
 
 ## Tech Stack
 
@@ -210,7 +210,7 @@ mail-queue（寄信按鈕與綁定 PTT 帳號觸發）
 | `pnpm server` | 開發伺服器 (nodemon + tsx, 熱重載) |
 | `pnpm build` | TypeScript 編譯 |
 | `pnpm start` | 生產環境啟動 |
-| `pnpm test:unit` | 單元測試 (486 個案例) |
+| `pnpm test:unit` | 單元測試 (500 個案例) |
 | `pnpm test:integration` | 整合測試 (需 DB/Redis) |
 | `pnpm test:cov` | 測試覆蓋率報告 |
 | `pnpm lint` | ESLint 檢查 |
