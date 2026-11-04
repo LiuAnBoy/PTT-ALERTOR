@@ -484,7 +484,13 @@ describe("PttTerminal.sendMail", () => {
 
   it("is unknown when the connection drops after the save key", async () => {
     const { transport, term } = await loggedIn([...LOGIN_REPLIES, ...MAIL_REPLIES.slice(0, 4)]);
-    setTimeout(() => transport.onClose?.(), 10);
+    // Drop the connection exactly when the save key goes out, not after a timer that can race
+    // the step timeouts.
+    const send = transport.send.bind(transport);
+    transport.send = (d) => {
+      send(d);
+      if (latin(d) === "s\r") setImmediate(() => transport.onClose?.());
+    };
     const result = await term.sendMail(params);
     expect(result).toMatchObject({ outcome: "unknown", errorCode: "ConnectFailed" });
   });
