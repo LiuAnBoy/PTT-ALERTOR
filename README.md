@@ -11,7 +11,7 @@
 - **看板熱門關鍵字** — `熱門 [看板]` 查詢該看板被訂閱的關鍵字排行
 - **一鍵寄信給作者** — 通知上的按鈕用你綁定的 PTT 副帳號寄站內信給文章作者（選用，見 [PTT 寄信功能與帳密聲明](#ptt-寄信功能與帳密聲明)）
 - **自動清理** — 過期文章和 log 自動清除
-- **錯誤告警** — FATAL/ERROR 自動推送給 admin，可透過 `/errors` 查看
+- **錯誤告警** — FATAL/ERROR 自動推送給 admin，可透過 `/errors` 查看。設定 `SERVICE_KEY` 時告警送到 Service Manager 的 `system_admin` 管理頻道，未設定或該次發送失敗時改送 `ADMIN_TELEGRAM_ID` 的 Telegram 聊天室
 
 ## Tech Stack
 
@@ -210,7 +210,7 @@ mail-queue（寄信按鈕與綁定 PTT 帳號觸發）
 | `pnpm server` | 開發伺服器 (nodemon + tsx, 熱重載) |
 | `pnpm build` | TypeScript 編譯 |
 | `pnpm start` | 生產環境啟動 |
-| `pnpm test:unit` | 單元測試 (452 個案例) |
+| `pnpm test:unit` | 單元測試 (478 個案例) |
 | `pnpm test:integration` | 整合測試 (需 DB/Redis) |
 | `pnpm test:cov` | 測試覆蓋率報告 |
 | `pnpm lint` | ESLint 檢查 |
@@ -271,7 +271,11 @@ cp .env.example .env
 | `TELEGRAM_BOT_USERNAME` | Yes | — | Bot username |
 | `TELEGRAM_WEBHOOK_URL` | Yes | — | Public URL，Telegram 會將 update POST 到此 |
 | `TELEGRAM_WEBHOOK_SECRET` | No | — | Webhook 驗證密鑰，`openssl rand -hex 32` 產生；只能含 `A-Z a-z 0-9 _ -`、最長 256 字元，否則啟動失敗。設定後沒帶正確 header 的請求一律拒絕。**PTT 寄信功能需要它與 `PTT_ENCRYPT_KEY` 同時設定** |
-| `ADMIN_TELEGRAM_ID` | No | — | 填入你的 chat ID 即可接收 FATAL/ERROR 告警 |
+| `ADMIN_TELEGRAM_ID` | No | — | 你的 chat ID：未設定 `SERVICE_KEY` 時，FATAL/ERROR 告警直接送到這裡；設定 `SERVICE_KEY` 時作為 Service Manager 發送失敗的備援 |
+| **管理員告警（Service Manager）** ||||
+| `SERVICE_KEY` | No | — | 本服務在 Service Manager 的 bearer key（機密，不進 log）。設定後告警送到 notify_service 的管理頻道；未設定則走 `ADMIN_TELEGRAM_ID` |
+| `NOTIFY_SERVICE_URL` | No | `http://127.0.0.1:5000` | notify_service 位址（容器以 `network_mode: host` 連到主機的 5000 埠） |
+| `NOTIFY_ADMIN_CHANNEL` | No | `system_admin` | 接收告警的管理頻道 slug |
 | **PTT 寄信** ||||
 | `PTT_ENCRYPT_KEY` | No | — | 加密 PTT 密碼的金鑰：恰好 32 bytes 的 base64，`openssl rand -base64 32` 產生；設定但長度不對則啟動失敗。**未設定（或缺 `TELEGRAM_WEBHOOK_SECRET`）時寄信功能關閉** |
 | `MAIL_DAILY_LIMIT` | No | `20` | 每位使用者每天（台北時間）可領取的不同寄信請求數；重按今天已計入的失敗請求不受此限，重試次數由每篇文章 3 次的上限限制 |

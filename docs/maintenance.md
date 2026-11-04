@@ -82,9 +82,11 @@ ZREMRANGEBYSCORE active:articles -inf {cutoff_timestamp}
 
 | Level | Behavior |
 |-------|----------|
-| **FATAL** | 立即推送到 admin Telegram |
+| **FATAL** | 立即推送給 admin |
 | **ERROR** | 透過 AlertAggregator 聚合（見下方） |
 | **WARN** | 僅寫入 DB，不推送 |
+
+所有告警經 `adminNotifier.sendAdminAlert` 發送：設定 `SERVICE_KEY` 時送 Service Manager 的 `system_admin` 管理頻道，未設定或該次發送失敗時直送 `ADMIN_TELEGRAM_ID` 的 Telegram 聊天室。細節見 [notification-flow.md](notification-flow.md)。
 
 ### Alert Aggregation（告警聚合）
 

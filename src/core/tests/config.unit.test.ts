@@ -1,8 +1,12 @@
 import { randomBytes } from "node:crypto";
 
-import type { buildMailConfig as BuildMailConfigFn } from "../config";
+import type {
+  buildMailConfig as BuildMailConfigFn,
+  buildNotifyConfig as BuildNotifyConfigFn,
+} from "../config";
 
 type BuildMailConfig = typeof BuildMailConfigFn;
+type BuildNotifyConfig = typeof BuildNotifyConfigFn;
 
 // config.ts validates required vars at import time; give it placeholders when absent.
 const placeholders: Record<string, string> = {
@@ -18,7 +22,10 @@ const placeholders: Record<string, string> = {
 for (const [k, v] of Object.entries(placeholders)) process.env[k] ??= v;
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { buildMailConfig } = require("../config") as { buildMailConfig: BuildMailConfig };
+const { buildMailConfig, buildNotifyConfig } = require("../config") as {
+  buildMailConfig: BuildMailConfig;
+  buildNotifyConfig: BuildNotifyConfig;
+};
 
 const key = randomBytes(32).toString("base64");
 
@@ -62,5 +69,41 @@ describe("buildMailConfig", () => {
     expect(() => buildMailConfig({ PTT_ENCRYPT_KEY: randomBytes(33).toString("base64") })).toThrow(
       /PTT_ENCRYPT_KEY/,
     );
+  });
+});
+
+describe("buildNotifyConfig", () => {
+  it("defaults the URL and channel and is disabled without a key", () => {
+    expect(buildNotifyConfig({})).toEqual({
+      url: "http://127.0.0.1:5000",
+      serviceKey: "",
+      adminChannel: "system_admin",
+      enabled: false,
+    });
+  });
+
+  it("is enabled by a non-empty key and reads the URL and channel", () => {
+    expect(
+      buildNotifyConfig({
+        SERVICE_KEY: "k",
+        NOTIFY_SERVICE_URL: "http://notify:9000",
+        NOTIFY_ADMIN_CHANNEL: "ops",
+      }),
+    ).toEqual({ url: "http://notify:9000", serviceKey: "k", adminChannel: "ops", enabled: true });
+  });
+
+  it("trims the key, URL and channel; a blank key stays disabled and blanks use defaults", () => {
+    expect(buildNotifyConfig({ SERVICE_KEY: "  \n " }).enabled).toBe(false);
+    const c = buildNotifyConfig({
+      SERVICE_KEY: " abc \n",
+      NOTIFY_SERVICE_URL: " http://h:1/ ",
+      NOTIFY_ADMIN_CHANNEL: "  ",
+    });
+    expect(c).toEqual({
+      url: "http://h:1",
+      serviceKey: "abc",
+      adminChannel: "system_admin",
+      enabled: true,
+    });
   });
 });

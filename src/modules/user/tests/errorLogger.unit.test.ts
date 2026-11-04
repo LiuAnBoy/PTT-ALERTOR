@@ -9,18 +9,46 @@ jest.mock("../../broadcast/registry", () => ({
   getAdapter: () => ({ sendAlert: mockSendAlert }),
 }));
 jest.mock("../../../core/config", () => ({
-  config: { telegram: { adminChatId: "12345" } },
+  config: {
+    telegram: { adminChatId: "12345" },
+    notify: {
+      url: "http://127.0.0.1:5000",
+      serviceKey: "",
+      adminChannel: "system_admin",
+      enabled: false,
+    },
+  },
 }));
 
 import { alertAggregator } from "../../../core/alertAggregator";
+import { config } from "../../../core/config";
 import { logError, sendProgressAlert, sendRecoveryAlert } from "../services/errorLogger";
 
 const THIRTY_MIN_MS = 30 * 60_000;
 
+type MutableConfig = {
+  telegram: { adminChatId: string };
+  notify: { serviceKey: string; enabled: boolean };
+};
+const cfg = config as unknown as MutableConfig;
+const fetchMock = jest.fn();
+
 beforeEach(() => {
   jest.clearAllMocks();
   alertAggregator.reset();
+  cfg.telegram.adminChatId = "12345";
+  cfg.notify.serviceKey = "";
+  cfg.notify.enabled = false;
+  global.fetch = fetchMock as unknown as typeof fetch;
+  fetchMock.mockImplementation(
+    async () => new Response(JSON.stringify({ success: true }), { status: 200 }),
+  );
 });
+
+/** Parse the JSON body of the n-th Service Manager call. */
+function smBody(n = 0): { params: { text: string }; level: string } {
+  return JSON.parse(fetchMock.mock.calls[n][1].body);
+}
 
 describe("logError", () => {
   it("sends first alert immediately when state transitions from NORMAL to ALERTING", async () => {
@@ -123,6 +151,53 @@ describe("sendRecoveryAlert", () => {
 
   it("does nothing when state is NORMAL (guards against duplicate sends)", async () => {
     await sendRecoveryAlert();
+    expect(mockSendAlert).not.toHaveBeenCalled();
+  });
+});
+
+describe("Service Manager route", () => {
+  beforeEach(() => {
+    cfg.notify.serviceKey = "k";
+    cfg.notify.enabled = true;
+  });
+
+  it("sends the first alert and FATAL as error, progress as warning, recovery as success", async () => {
+    await logError("ERROR", "CRAWLER", "fetch failed", { httpStatus: 502 });
+    expect(smBody(0).level).toBe("error");
+    expect(smBody(0).params.text).toContain("爬蟲異常");
+
+    await logError("FATAL", "CRAWLER", "crashed");
+    expect(smBody(1).level).toBe("error");
+    expect(smBody(1).params.text).toBe("[FATAL] CRAWLER | crashed");
+
+    alertAggregator.markProgressSent(new Date(Date.now() - THIRTY_MIN_MS - 1000));
+    await sendProgressAlert();
+    expect(smBody(2).level).toBe("warning");
+
+    await sendRecoveryAlert();
+    expect(smBody(3).level).toBe("success");
+    expect(mockSendAlert).not.toHaveBeenCalled();
+  });
+
+  it("still alerts when ADMIN_TELEGRAM_ID is empty", async () => {
+    cfg.telegram.adminChatId = "";
+    await logError("FATAL", "CRAWLER", "crashed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the admin chat when Service Manager fails", async () => {
+    fetchMock.mockRejectedValue(new Error("down"));
+    await logError("FATAL", "CRAWLER", "crashed");
+    expect(mockSendAlert).toHaveBeenCalledWith("12345", "🚨 [FATAL] CRAWLER | crashed");
+  });
+});
+
+describe("no route configured", () => {
+  it("sends nothing when both routes are unset", async () => {
+    cfg.telegram.adminChatId = "";
+    await logError("FATAL", "CRAWLER", "crashed");
+    await logError("ERROR", "CRAWLER", "x", { httpStatus: 502 });
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(mockSendAlert).not.toHaveBeenCalled();
   });
 });

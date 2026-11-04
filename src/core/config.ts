@@ -64,6 +64,35 @@ export function buildMailConfig(env: {
   };
 }
 
+/** Settings of the Service Manager notify_service route for admin alerts. */
+export interface NotifyConfig {
+  /** Base URL of notify_service, without a trailing slash */
+  url: string;
+  /** Bearer key of this service in Service Manager, empty when unset. A secret: never log it. */
+  serviceKey: string;
+  /** Admin channel slug that receives the alerts */
+  adminChannel: string;
+  /** True when SERVICE_KEY is non-empty after trimming */
+  enabled: boolean;
+}
+
+/**
+ * Build the notify_service settings from raw env values.
+ * Pure so tests can evaluate it for given values; blank values fall back to the defaults.
+ * @param env - Raw values of SERVICE_KEY, NOTIFY_SERVICE_URL and NOTIFY_ADMIN_CHANNEL.
+ * @returns The notify config; `enabled` is true only when a non-blank SERVICE_KEY is set.
+ */
+export function buildNotifyConfig(env: {
+  SERVICE_KEY?: string | undefined;
+  NOTIFY_SERVICE_URL?: string | undefined;
+  NOTIFY_ADMIN_CHANNEL?: string | undefined;
+}): NotifyConfig {
+  const serviceKey = (env.SERVICE_KEY ?? "").trim();
+  const url = (env.NOTIFY_SERVICE_URL ?? "").trim().replace(/\/+$/, "") || "http://127.0.0.1:5000";
+  const adminChannel = (env.NOTIFY_ADMIN_CHANNEL ?? "").trim() || "system_admin";
+  return { url, serviceKey, adminChannel, enabled: serviceKey !== "" };
+}
+
 const mailEnv = buildMailConfig({
   PTT_ENCRYPT_KEY: process.env["PTT_ENCRYPT_KEY"],
   MAIL_DAILY_LIMIT: process.env["MAIL_DAILY_LIMIT"],
@@ -117,6 +146,13 @@ export const config = {
 
   /** PTT mail-to-author feature */
   mail: mailEnv.mail,
+
+  /** Service Manager notify_service route for admin alerts (optional) */
+  notify: buildNotifyConfig({
+    SERVICE_KEY: process.env["SERVICE_KEY"],
+    NOTIFY_SERVICE_URL: process.env["NOTIFY_SERVICE_URL"],
+    NOTIFY_ADMIN_CHANNEL: process.env["NOTIFY_ADMIN_CHANNEL"],
+  }),
 } as const;
 
 // ── Validate required environment variables on module load ──────────────────

@@ -30,6 +30,13 @@ export class StartupLogger {
     logger.info(`Webhook URL  : ${config.telegram.webhookUrl || "(not set)"}`);
     logger.info(`Admin Chat   : ${config.telegram.adminChatId || "(not set)"}`);
 
+    logger.info("--- Admin alerts ---");
+    logger.info(
+      config.notify.enabled
+        ? `Route : Service Manager (channel ${config.notify.adminChannel}), fallback to Admin Chat`
+        : "Route : Admin Chat (direct Telegram)",
+    );
+
     logger.info("=================================");
   }
 

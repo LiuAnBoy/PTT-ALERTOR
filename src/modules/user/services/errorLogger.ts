@@ -1,14 +1,10 @@
 import { alertAggregator } from "../../../core/alertAggregator";
-import { config } from "../../../core/config";
 import { classifyError } from "../../../core/errorClassifier";
-import { createLogger } from "../../../core/logger";
 import { getPrisma } from "../../../core/prisma";
-import { getAdapter } from "../../broadcast/registry";
+import { isAdminRouteConfigured, sendAdminAlert } from "../../notification/services/adminNotifier";
 
 /** Mirrors Prisma's LogLevel enum without requiring a generated client at compile time. */
 type LogLevel = "WARN" | "ERROR" | "FATAL";
-
-const logger = createLogger("BOT");
 
 /**
  * Log an error to crawler_logs and optionally push alert to admin.
@@ -32,16 +28,16 @@ export async function logError(
   });
 
   // Push alert to admin
-  if (!config.telegram.adminChatId) return;
+  if (!isAdminRouteConfigured()) return;
 
   if (level === "FATAL") {
-    await sendAlert(`🚨 [FATAL] ${module} | ${message}`);
+    await sendAdminAlert(`🚨 [FATAL] ${module} | ${message}`, "error");
   } else if (level === "ERROR") {
     const wasNormal = alertAggregator.getState() === "NORMAL";
     alertAggregator.recordError(classifyError(detail));
 
     if (wasNormal) {
-      await sendAlert(alertAggregator.getFirstAlert());
+      await sendAdminAlert(alertAggregator.getFirstAlert(), "error");
     }
   }
 }
@@ -55,7 +51,7 @@ export async function sendProgressAlert(): Promise<void> {
   const now = new Date();
   if (!alertAggregator.shouldSendProgress(now)) return;
   alertAggregator.markProgressSent(now);
-  await sendAlert(alertAggregator.getProgressAlert());
+  await sendAdminAlert(alertAggregator.getProgressAlert(), "warning");
 }
 
 /**
@@ -70,20 +66,7 @@ export async function sendRecoveryAlert(): Promise<void> {
   if (alertAggregator.getState() !== "ALERTING") return;
   const message = alertAggregator.getRecoveryMessage();
   alertAggregator.recover();
-  await sendAlert(message);
-}
-
-/**
- * Send an alert message to the admin Telegram chat.
- */
-async function sendAlert(text: string): Promise<void> {
-  if (!config.telegram.adminChatId) return;
-
-  try {
-    await getAdapter("TELEGRAM").sendAlert(config.telegram.adminChatId, text);
-  } catch (err) {
-    logger.error(`Failed to send admin alert: ${(err as Error).message}`);
-  }
+  await sendAdminAlert(message, "success");
 }
 
 /**

@@ -115,9 +115,14 @@ Base image: `node:22-alpine`
 | `TELEGRAM_WEBHOOK_SECRET` | No | — | Webhook secret (`openssl rand -hex 32`; only `A-Z a-z 0-9 _ -`, at most 256 characters, otherwise startup throws). When set, updates without the matching header are rejected. The PTT mail feature stays off unless it and `PTT_ENCRYPT_KEY` are both set |
 | `PTT_ENCRYPT_KEY` | No | — | Base64 of exactly 32 bytes (`openssl rand -base64 32`); encrypts stored PTT passwords with AES-256-GCM. Set but not 32 bytes → startup throws. Changing or losing it makes every stored password unreadable, so users must run `綁定PTT` again |
 | `MAIL_DAILY_LIMIT` | No | `20` | Mail taps each user may claim per day (Asia/Taipei) |
-| `ADMIN_TELEGRAM_ID` | No | — | Fill in your chat ID to receive FATAL/ERROR alerts |
+| `ADMIN_TELEGRAM_ID` | No | — | Your chat ID: receives FATAL/ERROR alerts directly when `SERVICE_KEY` is unset, and as the fallback when the Service Manager send fails |
+| `SERVICE_KEY` | No | — | This service's bearer key in Service Manager (a secret, never logged). When set, admin alerts go to the notify_service admin channel |
+| `NOTIFY_SERVICE_URL` | No | `http://127.0.0.1:5000` | notify_service base URL |
+| `NOTIFY_ADMIN_CHANNEL` | No | `system_admin` | Admin channel slug that receives the alerts |
 
 PTT 寄信功能的部署注意事項：`add_ptt_mail` migration 只新增（`ptt_accounts`、`mail_requests` 兩張表與 `Subscription` 兩個欄位），`./deploy.sh update` 偵測到 migration 變更會自動執行；回滾時對資料庫執行同目錄的 `down.sql`，並刪除 `_prisma_migrations` 中該筆紀錄。寄信功能另需 server 能以 WebSocket 連到 `wss://ws.ptt.cc/bbs/`。流程見 [mail-flow.md](mail-flow.md)。
+
+管理員告警的部署注意事項：設定 `SERVICE_KEY` 前，需在 Service Manager 後台為 `ptt_alertor` 啟用 `uses_notify` 與 `admin_notify_enabled`。App 容器以 `network_mode: host` 執行，從主機網路連 `http://127.0.0.1:5000`，因此依賴 notify_service 發布 `127.0.0.1:5000`（可用 `docker port notify_service` 確認）且 compose 保持 `network_mode: host`；任一項改變時告警會退回直送 `ADMIN_TELEGRAM_ID`，並需更新 `NOTIFY_SERVICE_URL`。未設定 `SERVICE_KEY` 時行為與先前相同。
 
 ## Graceful Shutdown
 
