@@ -113,13 +113,14 @@ src/
 │   ├── mail/                 # 從通知寄 PTT 站內信給作者
 │   │   ├── services/
 │   │   │   ├── mailService.ts      # 資格判斷、offer、requestMail、send/verify job、啟動復原
-│   │   │   └── pttTerminal.ts      # PTT 終端機客戶端 (WebSocket，登入與寄信)
+│   │   │   ├── pttTerminal.ts      # PTT 終端機客戶端 (WebSocket，登入、寄信與登出)
+│   │   │   └── loginGate.ts        # 每個 PTT 帳號 3 分鐘最多登入一次 (Redis 保留)
 │   │   ├── repositories/
 │   │   │   ├── mailRequestRepository.ts  # MailRequest：offer、原子 claim、狀態轉換
 │   │   │   └── pttAccountRepository.ts   # PttAccount：加密後的帳密
 │   │   ├── workers/
 │   │   │   ├── mailQueue.ts        # mail-queue 與 job 型別
-│   │   │   └── mailWorker.ts       # 處理 send / verify job (併發數: 1)
+│   │   │   └── mailWorker.ts       # 處理 send / verify job (併發數: 1)，登入間隔未到時延後 job
 │   │   └── tests/                  # 單元測試 + 整合測試 + 實機測試
 │   │
 │   └── user/                 # 使用者管理

@@ -11,6 +11,7 @@ import {
   getBot,
   getWebhookHandler,
   handleCallbackQuery,
+  handleStart,
   handleText,
   startBot,
   telegramAdapter,
@@ -92,6 +93,7 @@ jest.mock("../../mail/services/mailService", () => ({
 const mockExecuteSubAction = jest.fn();
 const mockExecuteBindStart = jest.fn();
 const mockHandlePending = jest.fn();
+const mockHandleBindInput = jest.fn();
 const mockParseCommand = jest.fn();
 
 jest.mock("../commandHandler", () => ({
@@ -106,6 +108,7 @@ jest.mock("../commandHandler", () => ({
   executeBindStart: (...a: any[]) => mockExecuteBindStart(...a),
   executeSubAction: (...a: any[]) => mockExecuteSubAction(...a),
   handlePending: (...a: any[]) => mockHandlePending(...a),
+  handleBindInput: (...a: any[]) => mockHandleBindInput(...a),
   parseCommand: (...a: any[]) => mockParseCommand(...a),
 }));
 
@@ -346,6 +349,14 @@ describe("handleText and callbacks", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it("/start at a bind step is taken as bind input, not as the start command", async () => {
+    mockHandleBindInput.mockResolvedValue({ reply: "驗證中…" });
+    const ctx = createMockContext({ messageText: "/start" });
+    await handleStart(ctx as any);
+    expect(ctx.reply).toHaveBeenCalledTimes(1);
+    expect(ctx.reply.mock.calls[0][0]).toBe("驗證中…");
   });
 
   it("sends the pending-input reply with an inline keyboard and skips command parsing", async () => {

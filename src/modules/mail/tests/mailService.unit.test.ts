@@ -482,8 +482,18 @@ describe("executeSendJob", () => {
     expect(mockAdapter.sendReply).not.toHaveBeenCalled();
   });
 
-  it("gives up quietly when the database stays down", async () => {
+  it("defers quietly, never logging in, while the database stays down", async () => {
     repo.getMailRequest.mockRejectedValue(new Error("db down"));
+    repo.markFailed.mockRejectedValue(new Error("db down"));
+    const result = await executeSendJob("req-1");
+    expect(result?.deferMs).toBeGreaterThan(0);
+    expect(mockReserve).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockAdapter.updateMessage).not.toHaveBeenCalled();
+  });
+
+  it("gives up quietly when the database fails after the login gate", async () => {
+    repo.getMailRequest.mockResolvedValueOnce(request()).mockRejectedValue(new Error("db down"));
     repo.markFailed.mockRejectedValue(new Error("db down"));
     await expect(executeSendJob("req-1")).resolves.toBeUndefined();
     expect(mockSend).not.toHaveBeenCalled();

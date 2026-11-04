@@ -14,6 +14,7 @@ import {
   executeStart,
   executeSubAction,
   executeUnbind,
+  handleBindInput,
   handlePending,
   parseCommand,
   PASSWORD_DELETE_WARNING,
@@ -674,6 +675,22 @@ describe("bind flow", () => {
 
   it("returns null when nothing is pending", async () => {
     expect(await handlePending(buildCtx({ text: "hello" }))).toBeNull();
+  });
+
+  it("handleBindInput takes a slash command as the password at the password step", async () => {
+    await toPasswordStep();
+    const deleteInputMessage = jest.fn().mockResolvedValue(undefined);
+    const result = await handleBindInput(buildCtx({ text: "/start", deleteInputMessage }));
+    expect(result?.reply).toContain("驗證中");
+    expect(deleteInputMessage).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueVerifyJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("handleBindInput leaves a reply-text wait and an empty state alone", async () => {
+    expect(await handleBindInput(buildCtx({ text: "/start" }))).toBeNull();
+    redisStore.set("mail:pending:123", JSON.stringify({ step: "replyText", subscriptionId: "x" }));
+    expect(await handleBindInput(buildCtx({ text: "/start" }))).toBeNull();
+    expect(redisStore.has("mail:pending:123")).toBe(true);
   });
 });
 

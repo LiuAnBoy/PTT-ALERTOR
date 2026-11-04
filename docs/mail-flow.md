@@ -79,6 +79,7 @@ PTT 的 DDoS/BOT 偵測系統會暫停短時間內反覆登入的帳號（約 5 
 - `reserveLogin(pttId)` 以 `SET mail:login:<pttId 小寫> PX 180000 NX` 原子地保留下一次登入；成功就馬上登入，否則回傳剩下的毫秒數。
 - send 與 verify job 在登入之前先保留。間隔未到時 job 不改任何狀態，回傳 `{ deferMs }`，`mailWorker` 以 `job.moveToDelayed` 把它移回 delayed 並丟出 `DelayedError`；延後不算一次嘗試，時間到了 worker 再執行一次。
 - send job 只在列是 `QUEUED`、帳號存在且未失效時保留；其他情況不會登入，也就不占用間隔。
+- send job 讀取列或帳號時遇到資料庫錯誤，就延後 30 秒：不知道是哪個帳號，直接往下走可能在資料庫恢復後落在間隔內登入。列維持 `QUEUED`。
 - PTT 回報帳號被暫停（`LoginThrottled`）時，`holdLogins` 把這個帳號的保留延長為 `THROTTLE_HOLD_MS`（10 分鐘），暫停期間不會再連線，以免暫停時間被延長。
 - Redis 出錯時回傳 60 秒的等待，不讓登入在無法確認間隔時通過。
 - 保留存在 Redis，每次開機的 flush 會清掉它；最壞情況是重啟後第一次登入提早發生一次。

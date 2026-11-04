@@ -126,6 +126,11 @@ describe("decideLogin", () => {
     expect(keys("(G)oodbye", afterId)).toBe("wait");
   });
 
+  it("recognises the main menu when PTT redraws its title without the opening 【", () => {
+    // Live PTT redraws only changed cells; the 【 left by the previous screen is not resent.
+    expect(keys("主功能表】                     批踢踢實業坊", afterPw)).toBe("done");
+  });
+
   it.each([
     ["任意鍵", "有一篇文章尚未完成\r\n請按任意鍵繼續"],
     ["duplicate login", "請選擇暫存檔\r\n您想刪除其他重複登入的連線嗎？[Y/n]"],
@@ -221,6 +226,20 @@ describe("decideMail", () => {
     expect(decideMail("after_save", "請按任意鍵繼續", input, false)).toMatchObject({
       next: "after_save",
     });
+  });
+
+  it("recognises the live mail menu, also when its title arrives without the opening 【", () => {
+    for (const screen of ["私人信件區】", "●(R)ead 我的信箱 (S)end 站內寄信", "【私人信件區】"]) {
+      expect(decideMail("mail_menu", screen, input, false)).toMatchObject({
+        next: "recipient_prompt",
+      });
+    }
+  });
+
+  it("does not take the main menu's 【 私人信件區 】 item for the mail menu", () => {
+    const mainMenu = "(M)ail         【 私人信件區 】 (T)alk 【 休閒聊天區 】";
+    expect(decideMail("mail_menu", mainMenu, input, false).kind).toBe("wait");
+    expect(decideMail("recipient_result", mainMenu, input, false).kind).toBe("wait");
   });
 
   it("does not answer the signature or draft-copy prompt again when it is redrawn", () => {

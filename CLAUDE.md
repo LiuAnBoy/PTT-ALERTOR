@@ -44,7 +44,7 @@ src/
 │   │   └── workers/        # notifierWorker
 │   ├── mail/           # Mail the article author from a notification (PTT terminal)
 │   │   ├── repositories/   # mailRequestRepository, pttAccountRepository
-│   │   ├── services/       # mailService, pttTerminal
+│   │   ├── services/       # mailService, pttTerminal, loginGate (one login per PTT account per 3 min)
 │   │   ├── workers/        # mailQueue, mailWorker
 │   │   └── tests/          # Unit + integration + live (PTT_LIVE=1) tests
 │   └── user/           # User management
@@ -83,7 +83,7 @@ mail button / 綁定PTT → mail-queue → mailWorker → loginGate → PTT term
 | `user:{userId}:board:{board}` | SET | User's keywords for a board |
 | `board:latest` | HASH | Latest article timestamp per board (field=board) |
 | `active:articles` | ZSET | Active articles in 24h window (score=timestamp, member=`{board}:{code}`) |
-| `mail:pending:<platformUserId>` | STRING | Pending multi-step input (bind ID, bind password, reply text) as JSON, never the password; TTL 300s, cleared by any recognised command |
+| `mail:pending:<platformUserId>` | STRING | Pending multi-step input (bind ID, bind password, reply text) as JSON, never the password; TTL 300s. The bind steps take every text (slash commands included) as input and end only by input, `取消` at the ID step, or the TTL; a recognised command clears only the reply-text step |
 | `mail:login:<pttId lower case>` | STRING | Login gate of one PTT account: set NX with PX 180000 when a mail or verify job logs in; PX 600000 after PTT suspended the account |
 | `bull:{queue}:*` | mixed | BullMQ jobs/state — finalized completed/failed records pruned by `removeOnComplete`/`removeOnFail`. Scheduler / repeatable / delayed metadata is **not** capped by retention; cleared only by startup `flushdb`. See `docs/maintenance.md`. |
 
@@ -99,7 +99,7 @@ App db is configurable via `REDIS_DB` env var (default 0, validated 0-15). On st
 pnpm server              # Dev server (nodemon + tsx, hot reload)
 pnpm build               # TypeScript compile
 pnpm start               # Production start
-pnpm test:unit           # Unit tests only (*.unit.test.ts, ~392 cases)
+pnpm test:unit           # Unit tests only (*.unit.test.ts, ~452 cases)
 pnpm test:integration    # Integration tests (requires DB/Redis)
 pnpm test:cov            # Coverage report
 pnpm lint                # ESLint check

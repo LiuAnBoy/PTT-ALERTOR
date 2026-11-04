@@ -210,7 +210,7 @@ mail-queue（寄信按鈕與綁定 PTT 帳號觸發）
 | `pnpm server` | 開發伺服器 (nodemon + tsx, 熱重載) |
 | `pnpm build` | TypeScript 編譯 |
 | `pnpm start` | 生產環境啟動 |
-| `pnpm test:unit` | 單元測試 (392 個案例) |
+| `pnpm test:unit` | 單元測試 (452 個案例) |
 | `pnpm test:integration` | 整合測試 (需 DB/Redis) |
 | `pnpm test:cov` | 測試覆蓋率報告 |
 | `pnpm lint` | ESLint 檢查 |

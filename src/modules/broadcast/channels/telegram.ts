@@ -17,6 +17,7 @@ import {
   executeSubAction,
   executeUnbind,
   getUser,
+  handleBindInput,
   handlePending,
   parseCommand,
 } from "../commandHandler";
@@ -184,9 +185,26 @@ async function replyWith(ctx: Context, result: CommandResult): Promise<void> {
 }
 
 /**
- * Handle /start command.
+ * Take a slash-command message as bind input when a bind step is pending: grammy routes slash
+ * commands past {@link handleText}, and at the password step every text is the password.
+ * @param ctx - The Grammy context.
+ * @returns True when the message was consumed as bind input.
  */
-async function handleStart(ctx: Context) {
+async function takeBindInput(ctx: Context): Promise<boolean> {
+  const cmdCtx = toCommandContext(ctx);
+  if (!cmdCtx?.text) return false;
+  const result = await handleBindInput(cmdCtx);
+  if (!result) return false;
+  await replyWith(ctx, result);
+  return true;
+}
+
+/**
+ * Handle /start command.
+ * @internal Exported for unit testing only.
+ */
+export async function handleStart(ctx: Context) {
+  if (await takeBindInput(ctx)) return;
   const cmdCtx = toCommandContext(ctx);
   if (!cmdCtx) return;
   const result = await executeStart(cmdCtx);
@@ -346,6 +364,7 @@ async function handleSubCallback(ctx: Context, data: string): Promise<string | u
  * Handle /errors command - show recent error logs (admin only).
  */
 async function handleErrors(ctx: Context) {
+  if (await takeBindInput(ctx)) return;
   if (!ctx.from || !config.telegram.adminChatId) return;
   if (String(ctx.from.id) !== config.telegram.adminChatId) return;
 

@@ -427,8 +427,9 @@ export interface DeferredJob {
 
 /**
  * Ask the login gate before a send job logs in. Only a QUEUED request with a usable account
- * will log in, so every other case returns 0 and lets {@link startSend} decide; a database
- * error also returns 0, because startSend then fails the request without logging in.
+ * will log in, so every other case returns 0 and lets {@link startSend} decide. A database
+ * error defers the job for {@link DB_ERROR_WAIT_MS}: the account is unknown, so going ahead
+ * could log in inside its gap once the database answers again. The row stays QUEUED.
  * @param requestId - The MailRequest id.
  * @returns 0 to go ahead now, else the milliseconds to wait.
  */
@@ -440,11 +441,15 @@ async function sendLoginWait(requestId: string): Promise<number> {
     const account = await pttAccounts.getPttAccount(request.userId);
     if (!account || account.invalidAt) return 0;
     pttId = account.pttId;
-  } catch {
-    return 0;
+  } catch (err) {
+    logger.error(`Send job ${requestId} cannot read its account: ${(err as Error).message}`);
+    return DB_ERROR_WAIT_MS;
   }
   return reserveLogin(pttId);
 }
+
+/** How long a send job waits when the login gate cannot read its account. */
+const DB_ERROR_WAIT_MS = 30_000;
 
 /**
  * Run a `send` job: QUEUED to SENDING, send the mail, then SENT, FAILED or UNKNOWN. The row

@@ -8,7 +8,7 @@
 
 | Type | Location | 命名 | 依賴 | 數量 |
 |------|----------|------|------|------|
-| Unit | `modules/*/tests/`、`core/tests/` | `*.unit.test.ts` | 全部 mock | 392（20 個檔案） |
+| Unit | `modules/*/tests/`、`core/tests/` | `*.unit.test.ts` | 全部 mock | 452（21 個檔案） |
 | Integration | `modules/*/tests/` | `*.test.ts`、`*.integration.test.ts` | 真實 DB/Redis/PTT | 7 個檔案 |
 
 ## Commands
@@ -84,10 +84,10 @@ import { myFunction } from "../services/myModule";
 | `notifierService.unit.test.ts` | `notification/tests/` | 20 |
 | `errorLogger.unit.test.ts` | `user/tests/` | 11 |
 | `syncService.unit.test.ts` | `user/tests/` | 12 |
-| `commandHandler.unit.test.ts` | `broadcast/tests/` | 65 |
-| `telegram.unit.test.ts` | `broadcast/tests/` | 39 |
-| `mailService.unit.test.ts` | `mail/tests/` | 49 |
-| `pttTerminal.unit.test.ts` | `mail/tests/` | 72 |
+| `commandHandler.unit.test.ts` | `broadcast/tests/` | 79 |
+| `telegram.unit.test.ts` | `broadcast/tests/` | 42 |
+| `mailService.unit.test.ts` | `mail/tests/` | 50 |
+| `pttTerminal.unit.test.ts` | `mail/tests/` | 75 |
 | `loginGate.unit.test.ts` | `mail/tests/` | 5 |
 
 寄信功能相關測試的重點：

@@ -503,6 +503,19 @@ export async function executeSubAction(
 // ─── Pending input ──────────────────────────────────────────────────────────
 
 /**
+ * Consume the message only when the user is at a bind step. Platforms call this before their
+ * own slash commands (which do not go through the text handler), so a password that starts
+ * with "/" is still taken as the password and deleted.
+ * @param ctx - The command context of the incoming text.
+ * @returns The bind step's reply, or null when no bind step is pending.
+ */
+export async function handleBindInput(ctx: CommandContext): Promise<CommandResult | null> {
+  const pending = await getPending(ctx.platformUserId);
+  if (pending?.step !== "bindId" && pending?.step !== "bindPassword") return null;
+  return handlePending(ctx);
+}
+
+/**
  * Consume the user's message when the bot is waiting for one (bind ID, password, reply text).
  * The bind steps consume every text before any command parsing: at the password step the text
  * is the password whatever it looks like, and at the ID step it is an ID, a validation error,
