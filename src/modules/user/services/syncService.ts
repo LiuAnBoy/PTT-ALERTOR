@@ -3,12 +3,11 @@ import { getPrisma } from "../../../core/prisma";
 import { redis } from "../../../core/redis";
 import {
   addActiveArticles,
-  cacheArticles,
   hasLatestTimestamp,
   removeLatestTimestamp,
   setLatestTimestamp,
 } from "../../board/services/articleCache";
-import { fetchHtml } from "../../board/services/htmlFetcher";
+import { seedBoardBaseline } from "../../board/services/crawlerService";
 
 const logger = createLogger("SERVER");
 
@@ -107,7 +106,9 @@ export async function syncSubscriptions(): Promise<void> {
 
 /**
  * Seed article cache from DB on startup.
- * Populates board:latest HASH and active:articles ZSET for all subscribed boards.
+ * board:latest takes each subscribed board's newest article of all time, so a quiet board keeps
+ * its baseline and its old articles are not treated as new. active:articles takes the last 24
+ * hours, the window the update worker tracks.
  * Must be called after syncSubscriptions() so the boards SET is available.
  */
 export async function seedArticleCache(): Promise<void> {
@@ -117,10 +118,21 @@ export async function seedArticleCache(): Promise<void> {
     return;
   }
 
-  // Query recent articles (last 24h) for subscribed boards
-  const cutoff = BigInt(Math.floor(Date.now() / 1000) - 24 * 60 * 60);
+  const newestByBoard = await getPrisma().article.groupBy({
+    by: ["board"],
+    where: { board: { in: boards } },
+    _max: { timestamp: true },
+  });
 
-  const articles = await getPrisma().article.findMany({
+  let seededBoards = 0;
+  for (const { board, _max } of newestByBoard) {
+    if (_max.timestamp === null) continue;
+    await setLatestTimestamp(board, Number(_max.timestamp));
+    seededBoards++;
+  }
+
+  const cutoff = BigInt(Math.floor(Date.now() / 1000) - 24 * 60 * 60);
+  const recent = await getPrisma().article.findMany({
     where: {
       board: { in: boards },
       timestamp: { gte: cutoff },
@@ -128,35 +140,16 @@ export async function seedArticleCache(): Promise<void> {
     select: { code: true, board: true, timestamp: true },
   });
 
-  if (articles.length === 0) {
-    logger.info("Seed skipped: no recent articles in DB");
-    return;
-  }
-
-  // Group by board to find max timestamp per board
-  const boardMaxTs = new Map<string, number>();
-  const activeItems: { board: string; code: string; timestamp: number }[] = [];
-
-  for (const article of articles) {
-    const ts = Number(article.timestamp);
-    activeItems.push({ board: article.board, code: article.code, timestamp: ts });
-
-    const current = boardMaxTs.get(article.board) ?? 0;
-    if (ts > current) {
-      boardMaxTs.set(article.board, ts);
-    }
-  }
-
-  // Write board:latest HASH entries
-  for (const [board, maxTs] of boardMaxTs) {
-    await setLatestTimestamp(board, maxTs);
-  }
-
-  // Write active:articles ZSET entries
-  await addActiveArticles(activeItems);
+  await addActiveArticles(
+    recent.map((article) => ({
+      board: article.board,
+      code: article.code,
+      timestamp: Number(article.timestamp),
+    })),
+  );
 
   logger.info(
-    `Seed completed: ${boardMaxTs.size} boards, ${articles.length} articles loaded to Redis`,
+    `Seed completed: ${seededBoards}/${boards.length} boards with a baseline, ${recent.length} active articles`,
   );
 }
 
@@ -173,8 +166,8 @@ export async function addSubscriptionToRedis(
   board: string,
   keyword: string,
 ): Promise<void> {
-  // Seed article cache if this board has no latest entry yet,
-  // so existing articles won't be treated as "new" on next crawl.
+  // Seed the board's baseline if it has none yet, so existing articles won't be treated as "new"
+  // on the next crawl, and save them so the baseline survives a restart.
   // Uses Redis SET NX as a distributed lock to prevent duplicate seeding.
   const exists = await hasLatestTimestamp(board);
   if (!exists) {
@@ -182,9 +175,8 @@ export async function addSubscriptionToRedis(
     const acquired = await redis.set(lockKey, "1", "EX", 30, "NX");
     if (acquired) {
       try {
-        const articles = await fetchHtml(board);
-        await cacheArticles(board, articles);
-        logger.info(`Seeded cache for ${board}: ${articles.length} articles`);
+        const count = await seedBoardBaseline(board);
+        logger.info(`Seeded cache for ${board}: ${count} articles`);
       } catch (err) {
         logger.warn(`Failed to seed cache for ${board}: ${(err as Error).message}`);
       }

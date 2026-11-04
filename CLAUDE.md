@@ -72,7 +72,7 @@ mail button / 綁定PTT → mail-queue → mailWorker → loginGate → PTT term
 - **AlertAggregator**: 錯誤告警聚合，避免通知轟炸（NORMAL → ALERTING → NORMAL）；錯誤先經 `errorClassifier` 粗分類（5xx/4xx/逾時/解析/其他），故障期間每 30 分鐘節流進度告警，恢復時送含問題分布的報告
 - **Admin alerts**: 所有告警（含 FATAL）經 `adminNotifier.sendAdminAlert` 發送：設定 `SERVICE_KEY` 時送 Service Manager 的 `system_admin` 管理頻道，未設定或發送失敗時直送 `ADMIN_TELEGRAM_ID`；`SERVICE_KEY` 不進任何 log、錯誤文字或啟動日誌
 - **Mail queue**: `mail-queue`（`send` 寄信、`verify` 驗證綁定）由 `mailWorker` 以併發 1、每 5 秒 1 個 job 執行，`attempts: 1` 不自動重試；`loginGate` 讓同一個 PTT 帳號每 3 分鐘最多登入一次（PTT 的 DDoS/BOT 偵測會暫停反覆登入的帳號），間隔未到的 job 以 `moveToDelayed` + `DelayedError` 延後。持久狀態只在 Postgres 的 `MailRequest`（claim 在交易內原子完成，一封信最多寄出一次），Redis 被 flush 時由啟動的 `recoverInFlight` 復原；密碼只以 AES-256-GCM 密文存放與傳遞。需同時設定 `PTT_ENCRYPT_KEY` 與 `TELEGRAM_WEBHOOK_SECRET` 才啟用。見 `docs/mail-flow.md`
-- Startup 時 `syncSubscriptions()` 載入訂閱，`seedArticleCache()` 從 DB 回填 24h 內文章至 Redis
+- Startup 時 `syncSubscriptions()` 載入訂閱，`seedArticleCache()` 從 DB 回填各看板時間基準與 24h 內文章至 Redis
 - 爬蟲和比對在 hot path 中完全從 Redis 讀取，零 DB 查詢
 
 ### Redis Key Patterns
