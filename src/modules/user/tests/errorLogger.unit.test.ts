@@ -22,9 +22,11 @@ jest.mock("../../../core/config", () => ({
 
 import { alertAggregator } from "../../../core/alertAggregator";
 import { config } from "../../../core/config";
+import { lostNotifications } from "../../../core/lostNotificationTracker";
 import {
   closeAlertRound,
   logError,
+  reportNotificationLost,
   sendProgressAlert,
   sendRecoveryAlert,
 } from "../services/errorLogger";
@@ -41,6 +43,7 @@ const fetchMock = jest.fn();
 beforeEach(() => {
   jest.clearAllMocks();
   alertAggregator.reset();
+  lostNotifications.reset();
   cfg.telegram.adminChatId = "12345";
   cfg.notify.serviceKey = "";
   cfg.notify.enabled = false;
@@ -135,6 +138,61 @@ describe("closeAlertRound", () => {
 
     expect(mockSendAlert).toHaveBeenCalledTimes(1);
     expect(mockSendAlert).toHaveBeenCalledWith("12345", expect.stringContaining("爬蟲持續異常中"));
+  });
+});
+
+describe("reportNotificationLost", () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("alerts at once with the keyword and board", async () => {
+    await reportNotificationLost("Soho", "react");
+
+    expect(mockSendAlert).toHaveBeenCalledTimes(1);
+    const [, message] = mockSendAlert.mock.calls[0];
+    expect(message).toContain("推播通知遺失");
+    expect(message).toContain("react@Soho");
+  });
+
+  it("does not alert again inside the window", async () => {
+    await reportNotificationLost("Soho", "react");
+    await reportNotificationLost("Soho", "vue");
+
+    expect(mockSendAlert).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends accumulated losses from the round close once the window has passed", async () => {
+    jest.useFakeTimers({ now: new Date("2026-11-04T00:00:00Z") });
+    await reportNotificationLost("Soho", "react");
+    await reportNotificationLost("Soho", "vue");
+    await reportNotificationLost("CodeJob", "node");
+    mockSendAlert.mockClear();
+
+    await closeAlertRound(true);
+    expect(mockSendAlert).not.toHaveBeenCalled();
+
+    jest.setSystemTime(new Date("2026-11-04T00:30:00Z"));
+    await closeAlertRound(true);
+
+    expect(mockSendAlert).toHaveBeenCalledTimes(1);
+    const [, message] = mockSendAlert.mock.calls[0];
+    expect(message).toContain("共 2 則");
+    expect(message).toContain("node@CodeJob");
+
+    await closeAlertRound(true);
+    expect(mockSendAlert).toHaveBeenCalledTimes(1);
+  });
+
+  it("alerts through Service Manager without the leading emoji", async () => {
+    cfg.notify.serviceKey = "k";
+    cfg.notify.enabled = true;
+
+    await reportNotificationLost("Soho", "react");
+
+    expect(smBody().level).toBe("error");
+    expect(smBody().params.text.startsWith("推播通知遺失\n")).toBe(true);
+    expect(mockSendAlert).not.toHaveBeenCalled();
   });
 });
 

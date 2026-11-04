@@ -21,7 +21,7 @@ PTT Alertor 的爬蟲微服務。定時爬取 PTT 看板文章，比對使用者
 
 ```
 src/
-├── core/               # Shared infra (config, logger, redis, prisma, queue, crypto, maintenance, alertAggregator, errorClassifier, circuitBreaker, roundTracker)
+├── core/               # Shared infra (config, logger, redis, prisma, queue, crypto, maintenance, alertAggregator, errorClassifier, circuitBreaker, roundTracker, lostNotificationTracker)
 ├── modules/
 │   ├── board/          # Article crawling & caching
 │   │   ├── repositories/   # articleRepository (Prisma)
@@ -69,7 +69,7 @@ mail button / 綁定PTT → mail-queue → mailWorker → loginGate → PTT term
 - **PostgreSQL**: source of truth (users, subscriptions, articles, PTT accounts, mail requests)
 - **Redis**: read cache (subscriptions) + article tracking + BullMQ queues + PTT login gate
 - **CircuitBreaker**: PTT 故障時熔斷（CLOSED → OPEN → HALF_OPEN → CLOSED）
-- **AlertAggregator**: 錯誤告警聚合，避免通知轟炸（NORMAL → ALERTING → NORMAL）；錯誤先經 `errorClassifier` 粗分類（5xx/4xx/逾時/解析/其他），連續 5 輪（每分鐘一輪）異常才告警，之後每 30 分鐘節流進度告警，連續 3 輪正常時送含問題分布的報告
+- **AlertAggregator**: 錯誤告警聚合，避免通知轟炸（NORMAL → ALERTING → NORMAL）；錯誤先經 `errorClassifier` 粗分類（5xx/4xx/逾時/解析/其他），連續 5 輪（每分鐘一輪）異常才告警，之後每 30 分鐘節流進度告警，連續 3 輪正常時送含問題分布的報告；通知重試用盡另有立即告警（每 30 分鐘最多一則）
 - **Admin alerts**: 所有告警（含 FATAL）經 `adminNotifier.sendAdminAlert` 發送：設定 `SERVICE_KEY` 時送 Service Manager 的 `system_admin` 管理頻道，未設定或發送失敗時直送 `ADMIN_TELEGRAM_ID`；`SERVICE_KEY` 不進任何 log、錯誤文字或啟動日誌
 - **Mail queue**: `mail-queue`（`send` 寄信、`verify` 驗證綁定）由 `mailWorker` 以併發 1、每 5 秒 1 個 job 執行，`attempts: 1` 不自動重試；`loginGate` 讓同一個 PTT 帳號每 3 分鐘最多登入一次（PTT 的 DDoS/BOT 偵測會暫停反覆登入的帳號），間隔未到的 job 以 `moveToDelayed` + `DelayedError` 延後。持久狀態只在 Postgres 的 `MailRequest`（claim 在交易內原子完成，一封信最多寄出一次），Redis 被 flush 時由啟動的 `recoverInFlight` 復原；密碼只以 AES-256-GCM 密文存放與傳遞。需同時設定 `PTT_ENCRYPT_KEY` 與 `TELEGRAM_WEBHOOK_SECRET` 才啟用。見 `docs/mail-flow.md`
 - Startup 時 `syncSubscriptions()` 載入訂閱，`seedArticleCache()` 從 DB 回填各看板時間基準與 24h 內文章至 Redis
@@ -100,7 +100,7 @@ App db is configurable via `REDIS_DB` env var (default 0, validated 0-15). On st
 pnpm server              # Dev server (nodemon + tsx, hot reload)
 pnpm build               # TypeScript compile
 pnpm start               # Production start
-pnpm test:unit           # Unit tests only (*.unit.test.ts, ~500 cases)
+pnpm test:unit           # Unit tests only (*.unit.test.ts, ~509 cases)
 pnpm test:integration    # Integration tests (requires DB/Redis)
 pnpm test:cov            # Coverage report
 pnpm lint                # ESLint check

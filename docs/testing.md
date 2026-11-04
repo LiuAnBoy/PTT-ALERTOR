@@ -8,7 +8,7 @@
 
 | Type | Location | 命名 | 依賴 | 數量 |
 |------|----------|------|------|------|
-| Unit | `modules/*/tests/`、`core/tests/` | `*.unit.test.ts` | 全部 mock | 500（23 個檔案） |
+| Unit | `modules/*/tests/`、`core/tests/` | `*.unit.test.ts` | 全部 mock | 509（24 個檔案） |
 | Integration | `modules/*/tests/` | `*.test.ts`、`*.integration.test.ts` | 真實 DB/Redis/PTT | 7 個檔案 |
 
 ## Commands
@@ -73,6 +73,7 @@ import { myFunction } from "../services/myModule";
 | `config.unit.test.ts` | `core/tests/` | 8 |
 | `crypto.unit.test.ts` | `core/tests/` | 5 |
 | `errorClassifier.unit.test.ts` | `core/tests/` | 25 |
+| `lostNotificationTracker.unit.test.ts` | `core/tests/` | 5 |
 | `roundTracker.unit.test.ts` | `core/tests/` | 6 |
 | `startupLogger.unit.test.ts` | `core/tests/` | 4 |
 | `htmlFetcher.unit.test.ts` | `board/tests/` | 16 |
@@ -84,7 +85,7 @@ import { myFunction } from "../services/myModule";
 | `matcherService.unit.test.ts` | `subscription/tests/` | 16 |
 | `notifierService.unit.test.ts` | `notification/tests/` | 20 |
 | `adminNotifier.unit.test.ts` | `notification/tests/` | 23 |
-| `errorLogger.unit.test.ts` | `user/tests/` | 18 |
+| `errorLogger.unit.test.ts` | `user/tests/` | 22 |
 | `syncService.unit.test.ts` | `user/tests/` | 13 |
 | `commandHandler.unit.test.ts` | `broadcast/tests/` | 79 |
 | `telegram.unit.test.ts` | `broadcast/tests/` | 42 |
@@ -100,9 +101,10 @@ import { myFunction } from "../services/myModule";
 管理員告警相關測試的重點：
 
 - `alertAggregator.unit.test.ts`：連續第 5 個異常輪才告警、未滿 5 輪出現正常輪就清除累計、一輪多筆錯誤只算一輪、circuit 不是 CLOSED 的一輪算異常、連續 3 個正常輪才恢復、恢復中再失敗要重算。
+- `lostNotificationTracker.unit.test.ts`：第一則遺失立即回報、30 分鐘內累計、窗口結束才回報累計數量、同一批不回報兩次、回報後開始新窗口。
 - `config.unit.test.ts`：`buildNotifyConfig` 的預設 URL 與頻道、`SERVICE_KEY` 非空才啟用、key 與 URL 的 trim。
 - `adminNotifier.unit.test.ts`：Service Manager 請求的 URL、Authorization header 與完整 body（含首則告警去除 emoji 與 U+FE0F 後的全文）；路線選擇；非 2xx、`success: false`、無法解析、網路錯誤與逾時都退回直送 Telegram；送達後不重複送；任何情況都不丟例外；key 不會出現在任何 logger 呼叫，以 `util.inspect` 檢查（Error 的 message 也看得到），包括伺服器把長得像錯誤代碼的 key 當成 `payload.code` 回傳時。
-- `errorLogger.unit.test.ts`：單筆 ERROR 不推送、FATAL 立即推送；`closeAlertRound` 在第 5 輪送一則首則告警、未滿 5 輪不送、連續 3 個正常輪送一則恢復報告；首則與 FATAL 為 `error`、進度為 `warning`、恢復為 `success`；只設定 Service Manager（`ADMIN_TELEGRAM_ID` 為空）時仍會告警。
+- `errorLogger.unit.test.ts`：單筆 ERROR 不推送、FATAL 立即推送；`closeAlertRound` 在第 5 輪送一則首則告警、未滿 5 輪不送、連續 3 個正常輪送一則恢復報告；`reportNotificationLost` 第一則立即送且含關鍵字與看板、窗口內不再送，累計數量由 `closeAlertRound` 在窗口結束後送出；首則與 FATAL 為 `error`、進度為 `warning`、恢復為 `success`；只設定 Service Manager（`ADMIN_TELEGRAM_ID` 為空）時仍會告警。
 - `scheduler.unit.test.ts`：每次 dispatch 都先結算告警輪，即使讀取看板失敗或沒有看板；熔斷時該輪不算正常。
 - `startupLogger.unit.test.ts`：`SERVICE_KEY` 與 `ADMIN_TELEGRAM_ID` 的四種組合下，啟動 log 的 `Route :` 行都寫出實際生效的路線，且不印出 key。
 
