@@ -1,12 +1,11 @@
 import { Queue } from "bullmq";
 
-import { alertAggregator } from "../../../core/alertAggregator";
 import { crawlerCircuit } from "../../../core/circuitBreaker";
 import { createLogger } from "../../../core/logger";
 import { bullmqConnection } from "../../../core/queue";
 import { redis } from "../../../core/redis";
 import { roundTracker } from "../../../core/roundTracker";
-import { sendProgressAlert, sendRecoveryAlert } from "../../user/services/errorLogger";
+import { closeAlertRound } from "../../user/services/errorLogger";
 
 const logger = createLogger("SCHEDULER");
 
@@ -71,11 +70,15 @@ export async function startScheduler(): Promise<void> {
 /**
  * Read subscribed boards from Redis and dispatch a crawler job for each.
  * Called by the dispatch worker every minute.
- * Checks circuit breaker state before dispatching and handles recovery alerts.
+ * Closes the alert round of the previous minute first, then checks the circuit breaker
+ * before dispatching.
  *
  * @returns Array of board names dispatched.
  */
 export async function dispatchCrawlerJobs(): Promise<string[]> {
+  // Runs before anything can throw or return, so every tick counts as a round.
+  await closeAlertRound(crawlerCircuit.getState() === "CLOSED");
+
   const boards = await redis.smembers("boards");
 
   if (boards.length === 0) {
@@ -89,14 +92,8 @@ export async function dispatchCrawlerJobs(): Promise<string[]> {
       logger.info("Circuit HALF_OPEN: dispatching probe round");
     } else {
       logger.warn(`Circuit OPEN: skipping dispatch for ${boards.length} boards`);
-      await sendProgressAlert();
       return [];
     }
-  }
-
-  // Check if we just recovered (circuit CLOSED but alertAggregator still ALERTING)
-  if (crawlerCircuit.getState() === "CLOSED" && alertAggregator.getState() === "ALERTING") {
-    await sendRecoveryAlert();
   }
 
   roundTracker.startRound(boards.length);

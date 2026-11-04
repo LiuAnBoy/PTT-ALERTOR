@@ -8,13 +8,24 @@ const logger = createLogger("CRAWLER");
 /** Minimum gap between progress alerts while the outage is ongoing. */
 const PROGRESS_INTERVAL_MS = 30 * 60_000;
 
+/** Consecutive failing rounds before the first alert. One round is one dispatch tick (1 minute). */
+const ALERT_AFTER_FAILING_ROUNDS = 5;
+
+/** Consecutive clean rounds before an ongoing alert is reported as recovered. */
+const RECOVER_AFTER_CLEAN_ROUNDS = 3;
+
 /** Possible states for the alert aggregator state machine. */
 type AlertState = "NORMAL" | "ALERTING";
 
+/** What the caller must send after a round closes. */
+export type RoundOutcome = "alert" | "recover" | "none";
+
 /**
  * In-memory singleton that aggregates crawler error alerts to prevent
- * notification flooding. Implements a simple NORMAL → ALERTING → NORMAL
+ * notification flooding. Implements a round-based NORMAL → ALERTING → NORMAL
  * state machine and classifies errors so alerts can describe what went wrong.
+ * Errors only accumulate; the state changes when a round closes, so a transient
+ * error that clears within a few rounds alerts nobody.
  *
  * NOTE: state is process-local. All workers run in the same Node process, so a
  * synchronous "mark before send" guard is sufficient against same-event-loop
@@ -28,30 +39,63 @@ class AlertAggregator {
   private startedAt: Date | null = null;
   private firstCategory: ErrorCategory | null = null;
   private lastProgressAt: Date | null = null;
+  private errorsThisRound = 0;
+  private failingRounds = 0;
+  private cleanRounds = 0;
 
   /**
-   * Record a classified error. On the first error the state transitions from
-   * NORMAL to ALERTING, the timestamp and progress baseline are captured, and
-   * the first category is remembered. Subsequent errors accumulate per category.
+   * Record a classified error. The first error of a streak captures the start time and the
+   * first category; every error accumulates per category and marks the current round as failing.
    * @param category - The coarse category of the error.
    */
   recordError(category: ErrorCategory): void {
-    if (this.state === "NORMAL") {
-      this.state = "ALERTING";
-      this.startedAt = new Date();
-      // Progress baseline is initialised ONLY on the NORMAL → ALERTING edge,
-      // never per crawl round, so the 30-minute throttle is not reset by probes.
-      this.lastProgressAt = this.startedAt;
-      this.firstCategory = category;
-      logger.warn(`Alert state entered — first error category: ${category}`);
-    }
+    if (this.startedAt === null) this.startedAt = new Date();
+    if (this.firstCategory === null) this.firstCategory = category;
 
     this.categoryCounts.set(category, (this.categoryCounts.get(category) ?? 0) + 1);
     this.totalErrors += 1;
+    this.errorsThisRound += 1;
   }
 
   /**
-   * Build the first-alert message sent when the state transitions to ALERTING.
+   * Close the current round and advance the state machine. A round fails when an error was
+   * recorded in it or the circuit is not CLOSED (an open circuit crawls nothing, so it records
+   * no errors). A clean round before the alert threshold discards the streak.
+   * @param circuitClosed - Whether the circuit breaker is CLOSED.
+   * @returns "alert" when the first alert is due, "recover" when the recovery report is due.
+   */
+  closeRound(circuitClosed: boolean): RoundOutcome {
+    const failing = this.errorsThisRound > 0 || !circuitClosed;
+    this.errorsThisRound = 0;
+
+    if (failing) {
+      this.cleanRounds = 0;
+      this.failingRounds += 1;
+      if (this.startedAt === null) this.startedAt = new Date();
+      if (this.state === "NORMAL" && this.failingRounds >= ALERT_AFTER_FAILING_ROUNDS) {
+        this.state = "ALERTING";
+        this.lastProgressAt = new Date();
+        logger.warn(`Alert state entered after ${this.failingRounds} failing rounds`);
+        return "alert";
+      }
+      return "none";
+    }
+
+    this.failingRounds = 0;
+    if (this.state === "NORMAL") {
+      if (this.totalErrors > 0) {
+        logger.info(`Error streak cleared without alerting: ${this.totalErrors} errors`);
+      }
+      this.clear();
+      return "none";
+    }
+
+    this.cleanRounds += 1;
+    return this.cleanRounds >= RECOVER_AFTER_CLEAN_ROUNDS ? "recover" : "none";
+  }
+
+  /**
+   * Build the first-alert message sent when a round's outcome is "alert".
    * @returns A formatted string containing "爬蟲異常".
    */
   getFirstAlert(): string {
@@ -59,6 +103,7 @@ class AlertAggregator {
       "⚠️ 爬蟲異常偵測",
       `時間：${this.formatTime(this.startedAt)}`,
       `首個錯誤：${this.firstCategory ? CATEGORY_LABELS[this.firstCategory] : "未知"}`,
+      `已連續 ${ALERT_AFTER_FAILING_ROUNDS} 輪異常`,
     ];
     return lines.join("\n");
   }
@@ -176,6 +221,9 @@ class AlertAggregator {
     this.startedAt = null;
     this.firstCategory = null;
     this.lastProgressAt = null;
+    this.errorsThisRound = 0;
+    this.failingRounds = 0;
+    this.cleanRounds = 0;
   }
 
   /** Format a timestamp in the Asia/Taipei timezone, or "unknown" if null. */

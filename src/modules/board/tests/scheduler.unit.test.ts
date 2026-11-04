@@ -27,17 +27,12 @@ const mockCircuit = {
 };
 jest.mock("../../../core/circuitBreaker", () => ({ crawlerCircuit: mockCircuit }));
 
-const mockAggregator = { getState: jest.fn() };
-jest.mock("../../../core/alertAggregator", () => ({ alertAggregator: mockAggregator }));
-
 const mockStartRound = jest.fn();
 jest.mock("../../../core/roundTracker", () => ({ roundTracker: { startRound: mockStartRound } }));
 
-const mockSendProgressAlert = jest.fn().mockResolvedValue(undefined);
-const mockSendRecoveryAlert = jest.fn().mockResolvedValue(undefined);
+const mockCloseAlertRound = jest.fn().mockResolvedValue(undefined);
 jest.mock("../../user/services/errorLogger", () => ({
-  sendProgressAlert: () => mockSendProgressAlert(),
-  sendRecoveryAlert: () => mockSendRecoveryAlert(),
+  closeAlertRound: (...a: unknown[]) => mockCloseAlertRound(...a),
 }));
 
 // ── Imports (after mocks) ────────────────────────────────────────────────────
@@ -49,70 +44,63 @@ beforeEach(() => {
   mockSmembers.mockResolvedValue(["Soho", "CodeJob"]);
 });
 
-describe("dispatchCrawlerJobs — circuit gate paths", () => {
-  it("OPEN (no probe): sends throttled progress alert and does NOT dispatch", async () => {
+describe("dispatchCrawlerJobs", () => {
+  it("OPEN (no probe): closes the round as not clean and does NOT dispatch", async () => {
+    mockCircuit.getState.mockReturnValue("OPEN");
     mockCircuit.isOpen.mockReturnValue(true);
     mockCircuit.shouldAttempt.mockReturnValue(false);
 
     const result = await dispatchCrawlerJobs();
 
     expect(result).toEqual([]);
-    expect(mockSendProgressAlert).toHaveBeenCalledTimes(1);
-    expect(mockSendRecoveryAlert).not.toHaveBeenCalled();
+    expect(mockCloseAlertRound).toHaveBeenCalledWith(false);
     expect(mockQueueAdd).not.toHaveBeenCalled();
     expect(mockStartRound).not.toHaveBeenCalled();
   });
 
-  it("HALF_OPEN (probe): dispatches without sending a progress alert", async () => {
+  it("OPEN with cooldown elapsed: closes the round as not clean and dispatches a probe", async () => {
+    mockCircuit.getState.mockReturnValue("OPEN");
     mockCircuit.isOpen.mockReturnValue(true);
     mockCircuit.shouldAttempt.mockReturnValue(true);
-    mockCircuit.getState.mockReturnValue("HALF_OPEN");
-    mockAggregator.getState.mockReturnValue("ALERTING");
 
     const result = await dispatchCrawlerJobs();
 
     expect(result).toEqual(["Soho", "CodeJob"]);
-    expect(mockSendProgressAlert).not.toHaveBeenCalled();
-    expect(mockSendRecoveryAlert).not.toHaveBeenCalled();
+    expect(mockCloseAlertRound).toHaveBeenCalledWith(false);
     expect(mockStartRound).toHaveBeenCalledWith(2);
     expect(mockQueueAdd).toHaveBeenCalledTimes(2);
   });
 
-  it("CLOSED while ALERTING: sends recovery alert and dispatches", async () => {
-    mockCircuit.isOpen.mockReturnValue(false);
+  it("CLOSED: closes the round as circuit closed and dispatches", async () => {
     mockCircuit.getState.mockReturnValue("CLOSED");
-    mockAggregator.getState.mockReturnValue("ALERTING");
+    mockCircuit.isOpen.mockReturnValue(false);
 
     const result = await dispatchCrawlerJobs();
 
     expect(result).toEqual(["Soho", "CodeJob"]);
-    expect(mockSendRecoveryAlert).toHaveBeenCalledTimes(1);
-    expect(mockSendProgressAlert).not.toHaveBeenCalled();
+    expect(mockCloseAlertRound).toHaveBeenCalledWith(true);
     expect(mockQueueAdd).toHaveBeenCalledTimes(2);
   });
 
-  it("CLOSED while NORMAL: dispatches with no recovery/progress alert", async () => {
-    mockCircuit.isOpen.mockReturnValue(false);
+  it("closes the round before reading the boards, so a Redis failure still ticks", async () => {
     mockCircuit.getState.mockReturnValue("CLOSED");
-    mockAggregator.getState.mockReturnValue("NORMAL");
+    mockSmembers.mockRejectedValue(new Error("redis down"));
 
-    await dispatchCrawlerJobs();
+    await expect(dispatchCrawlerJobs()).rejects.toThrow("redis down");
 
-    expect(mockSendRecoveryAlert).not.toHaveBeenCalled();
-    expect(mockSendProgressAlert).not.toHaveBeenCalled();
-    expect(mockQueueAdd).toHaveBeenCalledTimes(2);
+    expect(mockCloseAlertRound).toHaveBeenCalledTimes(1);
   });
 
-  it("returns early when there are no subscribed boards", async () => {
+  it("still closes the round when there are no subscribed boards", async () => {
+    mockCircuit.getState.mockReturnValue("CLOSED");
     mockSmembers.mockResolvedValue([]);
 
     const result = await dispatchCrawlerJobs();
 
     expect(result).toEqual([]);
+    expect(mockCloseAlertRound).toHaveBeenCalledTimes(1);
     expect(mockCircuit.isOpen).not.toHaveBeenCalled();
     expect(mockQueueAdd).not.toHaveBeenCalled();
     expect(mockStartRound).not.toHaveBeenCalled();
-    expect(mockSendProgressAlert).not.toHaveBeenCalled();
-    expect(mockSendRecoveryAlert).not.toHaveBeenCalled();
   });
 });

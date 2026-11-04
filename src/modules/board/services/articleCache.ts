@@ -116,7 +116,7 @@ export async function filterNewArticles(
 
   const latest = await getLatestTimestamp(boardName);
 
-  // No entry for this board → all articles are new (first crawl)
+  // No baseline yet: the whole page passes so fetchNewArticles can save it and set the baseline.
   if (latest === null) return articles;
 
   return articles.filter((article) => Number(article.timestamp) > latest);

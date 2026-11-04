@@ -121,7 +121,9 @@ for (const board of boards) {
 
 ### 9. 過濾新文章 (Filter New Articles)
 
-透過 `board:latest` HASH 取得該看板最新文章的時間戳記，過濾掉時間戳記 ≤ 此值的文章。若看板無紀錄（首次爬取），所有文章均視為新文章。
+透過 `board:latest` HASH 取得該看板最新文章的時間戳記，過濾掉時間戳記 ≤ 此值的文章。
+
+看板沒有紀錄時沒有比較基準（例如新增訂閱時植入失敗，或 DB 還沒有這個看板的文章）：這一頁只用來建立基準，照常走儲存、快取與抓取詳情，但不派發比對任務，因此不會推播。基準的來源見 [subscription-sync.md](subscription-sync.md)。
 
 ### 10. 儲存與快取 (Save & Cache)
 
@@ -138,7 +140,7 @@ for (const board of boards) {
 
 ### 12. 派發比對任務 (Dispatch Matcher Jobs)
 
-將每篇新文章派發至 `matcher-queue`，內容包含看板、標題、代碼、作者、推文總數及連結。
+看板已有時間基準時，將每篇新文章派發至 `matcher-queue`，內容包含看板、標題、代碼、作者、推文總數及連結。
 
 ## 更新流程 (每 15 分鐘)
 
@@ -177,8 +179,8 @@ dispatchCrawlerJobs()
                     ▼
             roundTracker.checkRoundComplete()
                     │
-                    ├── 全滅 → circuitBreaker OPEN + 首則告警
-                    └── 有成功 → 保持/恢復 CLOSED + 恢復通知
+                    ├── 全滅 → circuitBreaker OPEN
+                    └── 有成功 → 保持/恢復 CLOSED
 ```
 
 相關模組：

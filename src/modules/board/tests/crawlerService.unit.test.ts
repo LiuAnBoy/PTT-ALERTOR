@@ -27,6 +27,7 @@ jest.mock("../services/articleCache", () => ({
   filterNewArticles: jest.fn(),
   cacheArticles: jest.fn().mockResolvedValue(undefined),
   getActiveArticleCodes: jest.fn(),
+  hasLatestTimestamp: jest.fn(),
   removeActiveArticle: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock("../services/detailFetcher", () => ({
@@ -45,9 +46,14 @@ import {
   cacheArticles,
   filterNewArticles,
   getActiveArticleCodes,
+  hasLatestTimestamp,
   removeActiveArticle,
 } from "../services/articleCache";
-import { fetchNewArticles, updateActiveArticles } from "../services/crawlerService";
+import {
+  fetchNewArticles,
+  seedBoardBaseline,
+  updateActiveArticles,
+} from "../services/crawlerService";
 import { ARTICLE_DELETED, fetchDetail } from "../services/detailFetcher";
 import { fetchHtml } from "../services/htmlFetcher";
 
@@ -56,6 +62,7 @@ const mockFilterNewArticles = filterNewArticles as jest.Mock;
 const mockCacheArticles = cacheArticles as jest.Mock;
 const mockFetchDetail = fetchDetail as jest.Mock;
 const mockInsertNewArticles = insertNewArticles as jest.Mock;
+const mockHasLatestTimestamp = hasLatestTimestamp as jest.Mock;
 const mockGetActiveArticleCodes = getActiveArticleCodes as jest.Mock;
 const mockRemoveActiveArticle = removeActiveArticle as jest.Mock;
 const mockUpdateArticleDetail = updateArticleDetail as jest.Mock;
@@ -83,11 +90,26 @@ function makeArticle(code: string, board = "Gossiping"): RawArticle {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockHasLatestTimestamp.mockResolvedValue(true);
 });
 
 // ---- fetchNewArticles -------------------------------------------------------
 
 describe("fetchNewArticles", () => {
+  it("should save and cache a board with no baseline but notify nothing", async () => {
+    const page = [makeArticle("M.001"), makeArticle("M.002")];
+    mockHasLatestTimestamp.mockResolvedValueOnce(false);
+    mockFetchHtml.mockResolvedValueOnce(page);
+    mockFilterNewArticles.mockResolvedValueOnce(page);
+    mockFetchDetail.mockResolvedValue(null);
+
+    await fetchNewArticles("Gossiping");
+
+    expect(mockInsertNewArticles).toHaveBeenCalledWith(page);
+    expect(mockCacheArticles).toHaveBeenCalledWith("Gossiping", page);
+    expect(mockAddBulk).not.toHaveBeenCalled();
+  });
+
   it("should return empty array when fetchHtml returns no articles", async () => {
     mockFetchHtml.mockResolvedValueOnce([]);
 
@@ -176,6 +198,21 @@ describe("fetchNewArticles", () => {
         },
       },
     ]);
+  });
+});
+
+// ---- seedBoardBaseline ------------------------------------------------------
+
+describe("seedBoardBaseline", () => {
+  it("should save and cache the page without notifying", async () => {
+    const page = [makeArticle("M.001"), makeArticle("M.002")];
+    mockFetchHtml.mockResolvedValueOnce(page);
+
+    await expect(seedBoardBaseline("Gossiping")).resolves.toBe(2);
+
+    expect(mockInsertNewArticles).toHaveBeenCalledWith(page);
+    expect(mockCacheArticles).toHaveBeenCalledWith("Gossiping", page);
+    expect(mockAddBulk).not.toHaveBeenCalled();
   });
 });
 

@@ -74,8 +74,11 @@ describe("roundTracker round accounting", () => {
 
 describe("roundTracker cascading reset", () => {
   it("clears the alert aggregator (including new category/progress state)", () => {
-    alertAggregator.recordError("HTTP_5XX");
     alertAggregator.recordError("TIMEOUT");
+    for (let i = 0; i < 5; i++) {
+      alertAggregator.recordError("HTTP_5XX");
+      alertAggregator.closeRound(true);
+    }
     alertAggregator.markProgressSent(new Date());
     expect(alertAggregator.getState()).toBe("ALERTING");
 

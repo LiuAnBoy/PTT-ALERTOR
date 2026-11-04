@@ -90,7 +90,7 @@ ZREMRANGEBYSCORE active:articles -inf {cutoff_timestamp}
 
 ### Alert Aggregation（告警聚合）
 
-取代舊版 per-key cooldown，避免大量錯誤時通知轟炸。
+避免短暫錯誤與大量錯誤時通知轟炸：ERROR 不會直接推送，只有連續多輪異常才告警。
 
 **狀態機**: `NORMAL → ALERTING → NORMAL`
 
@@ -104,18 +104,23 @@ ZREMRANGEBYSCORE active:articles -inf {cutoff_timestamp}
 | `PARSE` | `detail.kind === "parse"`（產生端明確標記） | 頁面解析失敗 |
 | `OTHER` | 其餘 | 其他錯誤 |
 
+**一輪**是一次 dispatch（每分鐘）：`dispatchCrawlerJobs` 一開始呼叫 `closeAlertRound()` 結算上一分鐘。這一分鐘內有任何 ERROR（不限來源），或 circuit 不是 CLOSED（熔斷時不爬取，不會產生 ERROR），就是異常輪；其餘是正常輪。
+
 | 事件 | 行為 |
 |------|------|
-| 第一筆 ERROR | 立即推送首則告警（含首個錯誤分類），進入 ALERTING 狀態 |
-| 後續 ERROR（ALERTING 中） | 僅按分類計數，不推播 |
-| Circuit Breaker OPEN 期間 | 每 30 分鐘最多推送一則進度告警（`sendProgressAlert()` 以 `lastProgressAt` 節流） |
-| 恢復正常 | 推送恢復報告（異常期間起訖、持續分鐘、累計次數、各分類次數），再重置計數器 |
+| ERROR | 寫入 DB 並按分類計數，不推播 |
+| 連續第 5 個異常輪 | 推送首則告警（含異常開始時間與首個錯誤分類），進入 ALERTING |
+| 未滿 5 輪就出現正常輪 | 清除累計，不推播；錯誤仍可從 `/errors` 查看 |
+| ALERTING 中 | 每 30 分鐘最多推送一則進度告警（`sendProgressAlert()` 以 `lastProgressAt` 節流） |
+| ALERTING 中連續 3 個正常輪 | 推送恢復報告（異常期間起訖、持續分鐘、累計次數、各分類次數），再重置計數器；中途出現異常輪時重新計算 |
 
 **訊息類型**：首次告警（⚠️）、進度告警（⏳，每 30 分節流）、恢復報告（✅，含問題分布）。恢復報告務必在 `recover()` 清除計數器**之前**產生。
 
-實作於 `src/core/alertAggregator.ts`（in-memory singleton），由 `errorLogger.ts` 的 `logError()` / `sendProgressAlert()` / `sendRecoveryAlert()` 觸發。
+**只會零星發生的錯誤不會告警**：`updateWorker` 每 15 分鐘才跑一次，通知發送失敗也只在有通知時才發生，這類錯誤湊不滿連續 5 輪，只會留在 `crawler_logs`，要用 `/errors` 查看。FATAL 不受影響，一律立即推送。
 
-> **已知限制**：aggregator 為單一 Node process 內的 in-memory singleton，節流與防重採「先 mark 再 send」。若未來拆成多 process / 多容器，需改用 Redis-backed 節流與鎖。
+實作於 `src/core/alertAggregator.ts`（in-memory singleton），由 `errorLogger.ts` 的 `logError()` 累計、`closeAlertRound()` 結算。
+
+> **已知限制**：aggregator 為單一 Node process 內的 in-memory singleton，重啟後累計歸零，節流與防重採「先 mark 再 send」。若未來拆成多 process / 多容器，需改用 Redis-backed 節流與鎖。
 
 ### Worker 失敗告警
 
@@ -175,7 +180,7 @@ defaultJobOptions: {
 
 **OPEN 期間行為**:
 - crawlerWorker 檢查 circuit 狀態，若 OPEN 則跳過執行
-- dispatchCrawlerJobs 呼叫 `sendProgressAlert()`（每 30 分鐘最多一則進度告警，非每輪洗版）
+- dispatchCrawlerJobs 照常每分鐘結算告警輪，熔斷期間每一輪都算異常輪（見 Alert Aggregation）
 - 不會完全停止排程，只是 worker 端 skip
 
 **每輪計數規則**（`src/core/roundTracker.ts`）：一個看板每輪只貢獻一個結果，以第一個記錄到的為準，同看板後續的記錄一律忽略；整輪結果也只會回報給 circuit breaker 一次。這是必要的，因為同一個 crawl job 會多次進入 worker——BullMQ 會重試，而熔斷後重試又會走 skip 分支——否則失敗數會超過看板總數（log 出現 `Round N complete: 6/3 failed`），並且每多記一次就重複觸發一次 `recordRoundResult`。

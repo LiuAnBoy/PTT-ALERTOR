@@ -1,7 +1,10 @@
 import { createMockRedis } from "../../../__mocks__/mockRedis";
 
 const mockRedis = createMockRedis();
-const mockPrisma = { subscription: { findMany: jest.fn() }, article: { findMany: jest.fn() } };
+const mockPrisma = {
+  subscription: { findMany: jest.fn() },
+  article: { findMany: jest.fn(), groupBy: jest.fn() },
+};
 
 jest.mock("../../../core/redis", () => ({ redis: mockRedis }));
 jest.mock("../../../core/prisma", () => ({ getPrisma: () => mockPrisma }));
@@ -15,23 +18,21 @@ jest.mock("../../../core/logger", () => ({
 }));
 jest.mock("../../board/services/articleCache", () => ({
   hasLatestTimestamp: jest.fn(),
-  cacheArticles: jest.fn().mockResolvedValue(undefined),
   addActiveArticles: jest.fn().mockResolvedValue(undefined),
   setLatestTimestamp: jest.fn().mockResolvedValue(undefined),
   removeLatestTimestamp: jest.fn().mockResolvedValue(undefined),
 }));
-jest.mock("../../board/services/htmlFetcher", () => ({
-  fetchHtml: jest.fn().mockResolvedValue([]),
+jest.mock("../../board/services/crawlerService", () => ({
+  seedBoardBaseline: jest.fn().mockResolvedValue(0),
 }));
 
 import {
   addActiveArticles,
-  cacheArticles,
   hasLatestTimestamp,
   removeLatestTimestamp,
   setLatestTimestamp,
 } from "../../board/services/articleCache";
-import { fetchHtml } from "../../board/services/htmlFetcher";
+import { seedBoardBaseline } from "../../board/services/crawlerService";
 import {
   addSubscriptionToRedis,
   removeSubscriptionFromRedis,
@@ -128,22 +129,27 @@ describe("seedArticleCache", () => {
 
     await seedArticleCache();
 
+    expect(mockPrisma.article.groupBy).not.toHaveBeenCalled();
     expect(mockPrisma.article.findMany).not.toHaveBeenCalled();
   });
 
-  it("should skip when no recent articles in DB", async () => {
+  it("should write nothing when the DB has no articles for the boards", async () => {
     mockRedis.smembers.mockResolvedValueOnce(["Gossiping"]);
+    mockPrisma.article.groupBy.mockResolvedValueOnce([]);
     mockPrisma.article.findMany.mockResolvedValueOnce([]);
 
     await seedArticleCache();
 
-    // Should query DB but not write to Redis
-    expect(mockPrisma.article.findMany).toHaveBeenCalled();
-    expect(mockRedis.hset).not.toHaveBeenCalled();
+    expect(setLatestTimestamp).not.toHaveBeenCalled();
+    expect(addActiveArticles).toHaveBeenCalledWith([]);
   });
 
-  it("should seed HASH and ZSET from DB articles", async () => {
+  it("should seed the newest article per board and the 24-hour active set", async () => {
     mockRedis.smembers.mockResolvedValueOnce(["Gossiping", "Stock"]);
+    mockPrisma.article.groupBy.mockResolvedValueOnce([
+      { board: "Gossiping", _max: { timestamp: BigInt(200) } },
+      { board: "Stock", _max: { timestamp: BigInt(150) } },
+    ]);
     mockPrisma.article.findMany.mockResolvedValueOnce([
       { code: "M.001", board: "Gossiping", timestamp: BigInt(100) },
       { code: "M.002", board: "Gossiping", timestamp: BigInt(200) },
@@ -152,16 +158,26 @@ describe("seedArticleCache", () => {
 
     await seedArticleCache();
 
-    // Should set max timestamp per board
     expect(setLatestTimestamp).toHaveBeenCalledWith("Gossiping", 200);
     expect(setLatestTimestamp).toHaveBeenCalledWith("Stock", 150);
-
-    // Should add all articles to active ZSET
     expect(addActiveArticles).toHaveBeenCalledWith([
       { board: "Gossiping", code: "M.001", timestamp: 100 },
       { board: "Gossiping", code: "M.002", timestamp: 200 },
       { board: "Stock", code: "M.100", timestamp: 150 },
     ]);
+  });
+
+  it("should keep the baseline of a quiet board with no article in the last 24 hours", async () => {
+    mockRedis.smembers.mockResolvedValueOnce(["Soho"]);
+    mockPrisma.article.groupBy.mockResolvedValueOnce([
+      { board: "Soho", _max: { timestamp: BigInt(100) } },
+    ]);
+    mockPrisma.article.findMany.mockResolvedValueOnce([]);
+
+    await seedArticleCache();
+
+    expect(setLatestTimestamp).toHaveBeenCalledWith("Soho", 100);
+    expect(addActiveArticles).toHaveBeenCalledWith([]);
   });
 });
 
@@ -169,17 +185,13 @@ describe("seedArticleCache", () => {
 // addSubscriptionToRedis
 // ---------------------------------------------------------------------------
 describe("addSubscriptionToRedis", () => {
-  it("should seed cache when board has no latest timestamp, then add keys to Redis", async () => {
-    const mockArticles = [{ title: "a1" }, { title: "a2" }];
+  it("should seed the baseline when board has no latest timestamp, then add keys to Redis", async () => {
     (hasLatestTimestamp as jest.Mock).mockResolvedValue(false);
-    (fetchHtml as jest.Mock).mockResolvedValue(mockArticles);
 
     await addSubscriptionToRedis("u1", "Gossiping", "covid");
 
-    // Should check HASH and seed it
     expect(hasLatestTimestamp).toHaveBeenCalledWith("Gossiping");
-    expect(fetchHtml).toHaveBeenCalledWith("Gossiping");
-    expect(cacheArticles).toHaveBeenCalledWith("Gossiping", mockArticles);
+    expect(seedBoardBaseline).toHaveBeenCalledWith("Gossiping");
 
     // Should still add to Redis via pipeline
     expect(pipe.sadd).toHaveBeenCalledWith("boards", "Gossiping");
@@ -188,30 +200,26 @@ describe("addSubscriptionToRedis", () => {
     expect(pipe.exec).toHaveBeenCalled();
   });
 
-  it("should skip cache seeding when board already has latest timestamp", async () => {
+  it("should skip seeding when board already has latest timestamp", async () => {
     (hasLatestTimestamp as jest.Mock).mockResolvedValue(true);
 
     await addSubscriptionToRedis("u1", "Stock", "TSMC");
 
     expect(hasLatestTimestamp).toHaveBeenCalledWith("Stock");
-    expect(fetchHtml).not.toHaveBeenCalled();
-    expect(cacheArticles).not.toHaveBeenCalled();
+    expect(seedBoardBaseline).not.toHaveBeenCalled();
 
     // Redis keys should still be set
     expect(pipe.sadd).toHaveBeenCalledWith("boards", "Stock");
     expect(pipe.exec).toHaveBeenCalled();
   });
 
-  it("should warn and continue adding to Redis when fetchHtml throws", async () => {
+  it("should warn and continue adding to Redis when seeding throws", async () => {
     (hasLatestTimestamp as jest.Mock).mockResolvedValue(false);
-    (fetchHtml as jest.Mock).mockRejectedValue(new Error("network error"));
+    (seedBoardBaseline as jest.Mock).mockRejectedValueOnce(new Error("network error"));
 
     await addSubscriptionToRedis("u1", "Gossiping", "covid");
 
-    // fetchHtml was called and failed
-    expect(fetchHtml).toHaveBeenCalledWith("Gossiping");
-    // cacheArticles should NOT have been called since fetchHtml threw
-    expect(cacheArticles).not.toHaveBeenCalled();
+    expect(seedBoardBaseline).toHaveBeenCalledWith("Gossiping");
 
     // Redis keys should still be set despite the seeding failure
     expect(pipe.sadd).toHaveBeenCalledWith("boards", "Gossiping");

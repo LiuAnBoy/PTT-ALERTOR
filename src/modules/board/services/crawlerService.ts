@@ -8,6 +8,7 @@ import {
   cacheArticles,
   filterNewArticles,
   getActiveArticleCodes,
+  hasLatestTimestamp,
   removeActiveArticle,
 } from "./articleCache";
 import { ARTICLE_DELETED, fetchDetail } from "./detailFetcher";
@@ -47,6 +48,8 @@ async function getPLimit() {
 /**
  * Fetch new articles from a board via HTML scraping.
  * Inserts new articles to DB, updates Redis cache, and fetches detail pages.
+ * A board with no baseline in Redis has nothing to compare against, so its page only sets the
+ * baseline: it is saved and cached, and nothing is notified.
  *
  * @param boardName - The board name to crawl.
  * @returns Array of new articles found.
@@ -58,6 +61,8 @@ export async function fetchNewArticles(boardName: string): Promise<RawArticle[]>
     logger.debug(`No articles found for ${boardName}`);
     return [];
   }
+
+  const hasBaseline = await hasLatestTimestamp(boardName);
 
   // Filter new articles via Redis HASH timestamp comparison
   const newArticles = await filterNewArticles(boardName, articles);
@@ -77,6 +82,11 @@ export async function fetchNewArticles(boardName: string): Promise<RawArticle[]>
   // Fetch detail pages for new articles (concurrent)
   await fetchDetailsForArticles(newArticles);
 
+  if (!hasBaseline) {
+    logger.info(`${boardName}: baseline set from ${newArticles.length} articles, none notified`);
+    return newArticles;
+  }
+
   // Dispatch matcher jobs for new articles (bulk add)
   await matcherQueue.addBulk(
     newArticles.map((article) => ({
@@ -93,6 +103,20 @@ export async function fetchNewArticles(boardName: string): Promise<RawArticle[]>
   );
 
   return newArticles;
+}
+
+/**
+ * Set a board's baseline from its current page without notifying anyone: the page is saved and
+ * cached, so its articles are not new on the next crawl or after a restart.
+ *
+ * @param boardName - The board name.
+ * @returns Number of articles on the page.
+ */
+export async function seedBoardBaseline(boardName: string): Promise<number> {
+  const articles = await fetchHtml(boardName);
+  await insertNewArticles(articles);
+  await cacheArticles(boardName, articles);
+  return articles.length;
 }
 
 /**

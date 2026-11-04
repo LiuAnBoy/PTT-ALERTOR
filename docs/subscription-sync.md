@@ -16,7 +16,7 @@
   ├── connectDatabase()
   ├── connectRedis()       ← flushdb（只清本服務 db）
   ├── syncSubscriptions()  ← 全量同步訂閱
-  ├── seedArticleCache()   ← 從 DB 回填 24h 內文章至 Redis
+  ├── seedArticleCache()   ← 從 DB 回填時間基準與 24h 內文章至 Redis
   ├── startScheduler()
   └── startBot()
 ```
@@ -66,9 +66,10 @@ handleAdd (Bot handler)
         │
         ├── HEXISTS board:latest {board}?
         │   │
-        │   ├── 否：植入快取 (Seed Cache)
-        │   │   ├── fetchHtml(board) → 抓取目前看板文章
-        │   │   └── cacheArticles()  → ZADD active:articles + HSET board:latest
+        │   ├── 否：seedBoardBaseline(board) 植入時間基準
+        │   │   ├── fetchHtml(board)     → 抓取目前看板文章
+        │   │   ├── insertNewArticles()  → PostgreSQL（重啟後基準才不會變舊）
+        │   │   └── cacheArticles()      → ZADD active:articles + HSET board:latest
         │   │   (避免既有文章被視為「新文章」而誤報)
         │   │
         │   └── 是：跳過植入（看板已有時間基準）
@@ -132,30 +133,29 @@ handleDelete (Bot handler)
 
 ### 即時植入 — 新增訂閱時
 
-當新增一個全新看板的訂閱時，`board:latest` HASH 中無該看板紀錄。若不預先植入，下次爬蟲會將看板內的所有既有文章視為「新文章」，導致大量誤報通知。
+當新增一個全新看板的訂閱時，`board:latest` HASH 中無該看板紀錄，`seedBoardBaseline(board)` 先植入時間基準：
 
-植入流程：
 1. `hasLatestTimestamp(board)` → `HEXISTS board:latest {board}`
 2. 若不存在：`fetchHtml(board)` → 抓取看板當前的文章
-3. `cacheArticles(board, articles)` → ZADD `active:articles` + HSET `board:latest`
+3. `insertNewArticles(articles)` → 寫入 PostgreSQL，下次重啟的啟動植入才讀得到這個基準
+4. `cacheArticles(board, articles)` → ZADD `active:articles` + HSET `board:latest`
 
-若 `fetchHtml` 失敗（例如看板名稱錯誤但 `boardValidator` 未攔截），系統會發出警告但不會中斷流程，訂閱仍會成功建立。
+若 `fetchHtml` 失敗（例如看板名稱錯誤但 `boardValidator` 未攔截），系統會發出警告但不會中斷流程，訂閱仍會成功建立；該看板下一次爬取會以當時的頁面建立基準，不推播，見 [crawling-flow.md](crawling-flow.md)。
 
 ### 啟動植入 — 伺服器重啟時
 
-伺服器重啟時 `connectRedis()` 執行 `flushdb`，本服務 db 清空（其他 db 不動）。`seedArticleCache()` 從 DB 回填最近 24 小時的文章：
+伺服器重啟時 `connectRedis()` 執行 `flushdb`，本服務 db 清空（其他 db 不動）。`seedArticleCache()` 從 DB 回填兩樣資料：
 
 ```
 seedArticleCache()
   │
   ├── redis.smembers("boards") → 取得所有訂閱看板
-  ├── prisma.article.findMany({ timestamp >= 24h前 }) → 查詢 DB
   │
-  ├── 計算每個看板的最大 timestamp
+  ├── prisma.article.groupBy({ by: board, _max: timestamp }) → 每個看板歷來最新的文章
   │   └── HSET board:latest {board} {maxTimestamp}
   │
-  └── 寫入所有文章至 active:articles ZSET
+  └── prisma.article.findMany({ timestamp >= 24h前 }) → 最近 24 小時的文章
       └── ZADD active:articles {timestamp} {board}:{code}
 ```
 
-確保重啟後 updateWorker 能繼續追蹤推文，且不會重複推播舊文章。
+時間基準不限 24 小時，因此 24 小時內沒有新文章的冷門看板重啟後仍有基準，頁面上的舊文章不會被當成新文章重新推播；停機期間出現的新文章時間戳記大於基準，重啟後照常推播。`active:articles` 維持 24 小時，是 updateWorker 追蹤推文的範圍。

@@ -9,7 +9,7 @@ type LogLevel = "WARN" | "ERROR" | "FATAL";
 /**
  * Log an error to crawler_logs and optionally push alert to admin.
  * FATAL: always push immediately.
- * ERROR: records into AlertAggregator; only the first error triggers an immediate alert.
+ * ERROR: records into AlertAggregator; {@link closeAlertRound} decides when to alert.
  *
  * @param level - Log severity level.
  * @param module - Module tag where the error occurred.
@@ -33,12 +33,23 @@ export async function logError(
   if (level === "FATAL") {
     await sendAdminAlert(`🚨 [FATAL] ${module} | ${message}`, "error");
   } else if (level === "ERROR") {
-    const wasNormal = alertAggregator.getState() === "NORMAL";
     alertAggregator.recordError(classifyError(detail));
+  }
+}
 
-    if (wasNormal) {
-      await sendAdminAlert(alertAggregator.getFirstAlert(), "error");
-    }
+/**
+ * Close the current alert round and send whatever it calls for: the first alert, the recovery
+ * report, or a throttled progress alert. Called once per dispatch tick.
+ * @param circuitClosed - Whether the circuit breaker is CLOSED.
+ */
+export async function closeAlertRound(circuitClosed: boolean): Promise<void> {
+  const outcome = alertAggregator.closeRound(circuitClosed);
+  if (outcome === "alert") {
+    await sendAdminAlert(alertAggregator.getFirstAlert(), "error");
+  } else if (outcome === "recover") {
+    await sendRecoveryAlert();
+  } else {
+    await sendProgressAlert();
   }
 }
 
@@ -56,7 +67,7 @@ export async function sendProgressAlert(): Promise<void> {
 
 /**
  * Send a recovery report and reset the aggregator back to NORMAL.
- * Should be called when the crawler recovers (circuit CLOSED while ALERTING).
+ * Called when a round's outcome is "recover".
  *
  * Order matters: build the report (reads counters) BEFORE recover() clears
  * them, and recover() synchronously flips state to NORMAL so a concurrent
