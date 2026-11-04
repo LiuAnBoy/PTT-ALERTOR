@@ -35,7 +35,8 @@ export type PttErrorCode =
   | "Timeout"
   | "ConnectFailed"
   | "UnfinishedDraft"
-  | "TooManySessions";
+  | "TooManySessions"
+  | "LoginThrottled";
 
 /** Typed failure of the terminal client; `code` is safe to log and to show. */
 export class PttError extends Error {
@@ -242,6 +243,11 @@ export function decideLogin(screen: string, state: LoginState, input: LoginInput
   // check covers the whole unanswered screen, so no later prompt on it receives a key either.
   if (/有一篇文章尚未完成|請選擇暫存檔/.test(screen)) {
     return { kind: "error", error: new PttError("UnfinishedDraft") };
+  }
+  // PTT's DDoS/BOT detection suspends an account that logs in too often; reconnecting during
+  // the suspension extends it, so this is reported and never retried right away.
+  if (/DDoS\/BOT 偵測系統|不當連續登入/.test(screen)) {
+    return { kind: "error", error: new PttError("LoginThrottled") };
   }
   if (/系統過載/.test(screen)) return { kind: "error", error: new PttError("PttBusy") };
   if (/此帳號已設定為只能使用安全連線/.test(screen)) {
@@ -608,8 +614,8 @@ export class PttTerminal {
    * @param id - PTT id.
    * @param password - PTT password; never logged.
    * @throws PttError `WrongPassword` (also for the ids guest and new), `TwoFactorRequired`,
-   *   `PttBusy`, `SecureConnectionRequired`, `UnfinishedDraft`, `TooManySessions`, `Timeout` or
-   *   `ConnectFailed`.
+   *   `PttBusy`, `SecureConnectionRequired`, `UnfinishedDraft`, `TooManySessions`,
+   *   `LoginThrottled`, `Timeout` or `ConnectFailed`.
    */
   async login(id: string, password: string): Promise<void> {
     assertRealPttId(id);

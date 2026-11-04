@@ -12,6 +12,7 @@ import * as mailRequests from "../repositories/mailRequestRepository";
 import { MAX_MAIL_ATTEMPTS } from "../repositories/mailRequestRepository";
 import * as pttAccounts from "../repositories/pttAccountRepository";
 import { mailQueue, SEND_JOB, VERIFY_JOB, type VerifyJobData } from "../workers/mailQueue";
+import { holdLogins, reserveLogin } from "./loginGate";
 import { PttError, sendPttMail, verifyPttLogin } from "./pttTerminal";
 
 const logger = createLogger("MAIL");
@@ -37,6 +38,8 @@ const FAIL_REASON = {
   secure: "PTT 要求安全連線，無法登入",
   draft: "這個 PTT 帳號有未完成的文章草稿，請先登入 PTT 一次，完成或放棄該草稿後再試",
   sessions: "這個 PTT 帳號同時登入的連線太多（3 個以上），為了不踢掉你的其他連線，請先登出其中幾個",
+  throttled:
+    "PTT 偵測到這個帳號登入太頻繁而暫停登入約 5 分鐘，機器人 10 分鐘內不會再用這個帳號登入",
   generic: "寄信失敗",
 } as const;
 
@@ -361,6 +364,8 @@ function reasonFor(code: PttError["code"] | undefined): string {
       return FAIL_REASON.draft;
     case "TooManySessions":
       return FAIL_REASON.sessions;
+    case "LoginThrottled":
+      return FAIL_REASON.throttled;
     default:
       return FAIL_REASON.generic;
   }
@@ -415,14 +420,56 @@ async function startSend(requestId: string): Promise<MailRequest | null> {
   return null;
 }
 
+/** A job that must wait for the account's login gap; the worker delays it by `deferMs`. */
+export interface DeferredJob {
+  deferMs: number;
+}
+
+/**
+ * Ask the login gate before a send job logs in. Only a QUEUED request with a usable account
+ * will log in, so every other case returns 0 and lets {@link startSend} decide; a database
+ * error also returns 0, because startSend then fails the request without logging in.
+ * @param requestId - The MailRequest id.
+ * @returns 0 to go ahead now, else the milliseconds to wait.
+ */
+async function sendLoginWait(requestId: string): Promise<number> {
+  let pttId: string;
+  try {
+    const request = await mailRequests.getMailRequest(requestId);
+    if (request?.status !== "QUEUED") return 0;
+    const account = await pttAccounts.getPttAccount(request.userId);
+    if (!account || account.invalidAt) return 0;
+    pttId = account.pttId;
+  } catch {
+    return 0;
+  }
+  return reserveLogin(pttId);
+}
+
 /**
  * Run a `send` job: QUEUED to SENDING, send the mail, then SENT, FAILED or UNKNOWN. The row
  * decides whether to act, so a repeated or stale job does nothing. Never mails twice for one
  * claim: only a certain not-sent outcome returns the row to FAILED. The plaintext password
- * lives only in a local variable and is never logged.
+ * lives only in a local variable and is never logged. When the account logged in less than
+ * the login gap ago, nothing changes and the job is returned as deferred (the row stays QUEUED).
+ * @param requestId - The MailRequest id.
+ * @returns The wait when the job must be delayed, otherwise undefined.
+ */
+export async function executeSendJob(requestId: string): Promise<DeferredJob | undefined> {
+  const wait = await sendLoginWait(requestId);
+  if (wait > 0) {
+    logger.info(`Send job ${requestId} deferred ${Math.ceil(wait / 1000)}s for the login gap`);
+    return { deferMs: wait };
+  }
+  await runSendJob(requestId);
+  return undefined;
+}
+
+/**
+ * The send job once the login gate let it through.
  * @param requestId - The MailRequest id.
  */
-export async function executeSendJob(requestId: string): Promise<void> {
+async function runSendJob(requestId: string): Promise<void> {
   const request = await startSend(requestId);
   if (!request) return;
 
@@ -495,6 +542,7 @@ export async function executeSendJob(requestId: string): Promise<void> {
     } else if (result.errorCode === "TwoFactorRequired") {
       await fail(FAIL_REASON.twoFactor, { retry: false });
     } else {
+      if (result.errorCode === "LoginThrottled") await holdLogins(account.pttId);
       await fail(reasonFor(result.errorCode));
     }
   } catch (err) {
@@ -508,16 +556,23 @@ export async function executeSendJob(requestId: string): Promise<void> {
 /**
  * Run a `verify` job: log in with the given credentials once; on success save the account
  * (ciphertext as given) and tell the user, else tell the user why not. The queue payload
- * carries only ciphertext; the plaintext exists in a local variable for the login.
+ * carries only ciphertext; the plaintext exists in a local variable for the login. When the
+ * account logged in less than the login gap ago, the job is returned as deferred untouched.
  * @param data - User, chat, PTT id and the encrypted password.
+ * @returns The wait when the job must be delayed, otherwise undefined.
  */
-export async function executeVerifyJob(data: VerifyJobData): Promise<void> {
+export async function executeVerifyJob(data: VerifyJobData): Promise<DeferredJob | undefined> {
   const { userId, chatId, pttId, passwordEnc } = data;
   let text: string;
   try {
     if (!config.mail.enabled) {
       text = MAIL_TEXT.verifyFailed(FAIL_REASON.disabled);
     } else {
+      const wait = await reserveLogin(pttId);
+      if (wait > 0) {
+        logger.info(`Verify job for user ${userId} deferred ${Math.ceil(wait / 1000)}s`);
+        return { deferMs: wait };
+      }
       const password = decryptSecret(passwordEnc, config.mail.encryptKey);
       await verifyPttLogin(pttId, password);
       await pttAccounts.upsertPttAccount(userId, pttId, passwordEnc);
@@ -532,6 +587,7 @@ export async function executeVerifyJob(data: VerifyJobData): Promise<void> {
       text = MAIL_TEXT.verifyDraft;
     } else if (err instanceof PttError) {
       logger.warn(`Verify failed for user ${userId}: ${err.code}`);
+      if (err.code === "LoginThrottled") await holdLogins(pttId);
       text = MAIL_TEXT.verifyFailed(reasonFor(err.code));
     } else {
       logger.error(`Verify job errored for user ${userId}: ${(err as Error).name}`);
@@ -539,6 +595,7 @@ export async function executeVerifyJob(data: VerifyJobData): Promise<void> {
     }
   }
   await report({ chatId }, text);
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

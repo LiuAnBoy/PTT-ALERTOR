@@ -86,14 +86,17 @@ import { myFunction } from "../services/myModule";
 | `syncService.unit.test.ts` | `user/tests/` | 12 |
 | `commandHandler.unit.test.ts` | `broadcast/tests/` | 65 |
 | `telegram.unit.test.ts` | `broadcast/tests/` | 39 |
-| `mailService.unit.test.ts` | `mail/tests/` | 33 |
-| `pttTerminal.unit.test.ts` | `mail/tests/` | 55 |
+| `mailService.unit.test.ts` | `mail/tests/` | 49 |
+| `pttTerminal.unit.test.ts` | `mail/tests/` | 72 |
+| `loginGate.unit.test.ts` | `mail/tests/` | 5 |
 
 寄信功能相關測試的重點：
 
 - `notifierService.unit.test.ts`：只有 `offerMail` 回傳 id 時 adapter 才收到按鈕；`offerMail` 丟錯誤時通知照常發送；訊息參考以 `recordNotificationMessage` 存下，存失敗不影響通知。
 - `telegram.unit.test.ts`：`sendNotification` 把按鈕轉成 inline keyboard 並回傳訊息參考；`updateMessage` 保留原本文、換按鈕並以回覆回報狀態，容忍 `message is not modified` / `message to edit not found`；`mail:<id>` 由非擁有者按下被拒絕且訊息不變；連按兩次只有第一次換成「⏳ 寄送中…」；`mail:noop` 只回應；Webhook secret 與密碼不進 log。
-- `mailService.unit.test.ts`：組信、claim 結果、狀態轉換、密碼不進 log。`pttTerminal.unit.test.ts`：登入與寄信的畫面狀態機、編碼與截斷。
+- `mailService.unit.test.ts`：組信、claim 結果、狀態轉換、登入間隔未到時延後且不動狀態、PTT 暫停登入時延長保留、密碼不進 log。
+- `pttTerminal.unit.test.ts`：登入、寄信與登出的畫面狀態機（包括 PTT 回顯答案時不重複送鍵、標題缺「【」的局部重畫、離站畫面的按鍵、連線太多與登入被暫停），以及編碼與截斷。
+- `loginGate.unit.test.ts`：保留以 `SET NX PX` 原子完成、未到時回傳剩餘時間、Redis 出錯時不放行、暫停後改為較長的保留。
 
 ## Integration Tests
 
@@ -115,7 +118,9 @@ pnpm test:integration
 | `fullCrawl.test.ts` | `board/tests/` | 抓取看板列表與每篇文章詳情並印出結果 |
 | `worker.test.ts` | `board/tests/` | BullMQ worker 端對端 |
 | `mailRequestRepository.integration.test.ts` | `mail/tests/` | 真實 Postgres：兩個並發 claim 只有一個成功、不同請求的並發 claim 止於每日上限 |
-| `pttTerminal.test.ts` | `mail/tests/` | 真實 PTT 登入並寄信給測試帳號自己；只在 `PTT_LIVE=1` 且設定 `PTT_TEST_ID`、`PTT_TEST_PASSWORD` 時執行，否則整個跳過 |
+| `pttTerminal.test.ts` | `mail/tests/` | 真實 PTT：一次登入，在同一條連線上寄信給測試帳號自己再登出；只在 `PTT_LIVE=1` 且設定 `PTT_TEST_ID`、`PTT_TEST_PASSWORD` 時執行，否則整個跳過 |
+
+`pttTerminal.test.ts` 每跑一次就登入 PTT 一次。PTT 的 DDoS/BOT 偵測會暫停短時間內反覆登入的帳號，暫停期間重連還會延長，所以兩次執行之間至少隔 3 分鐘；跑之前確認這個帳號在 PTT 上的其他連線少於 3 條（機器人一律不踢其他連線）。通過後到測試帳號的 PTT 信箱確認主旨與三行內文是正確的中文。
 
 ## Configuration
 

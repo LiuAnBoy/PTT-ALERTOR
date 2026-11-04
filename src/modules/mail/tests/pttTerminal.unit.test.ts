@@ -162,6 +162,13 @@ describe("decideLogin", () => {
     expect(keys("歡迎光臨", fresh)).toBe("wait");
   });
 
+  it("reports PTT's DDoS/BOT suspension instead of answering anything", () => {
+    const screen =
+      "[PTT DDoS/BOT 偵測系統] 帳號 alice 有疑似不當連續登入行為所以暫停連線，約 5 分鐘後恢復。";
+    const d = decideLogin(screen, afterPw, loginInput);
+    expect((d as { error: PttError }).error.code).toBe("LoginThrottled");
+  });
+
   it("records a yes/no answer and ignores the prompt redrawn with that answer", () => {
     const d = decideLogin("您想刪除其他重複登入的連線嗎？[Y/n]", afterPw, loginInput);
     const next = (d as { next: LoginState }).next;

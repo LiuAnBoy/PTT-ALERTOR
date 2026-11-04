@@ -218,6 +218,7 @@ src/
 - `mail/` 與平台無關：`mailService` 負責資格判斷、`requestMail` 與 job 執行，結果文字集中在 `MAIL_TEXT`；`pttTerminal` 是 PTT 終端機客戶端，其他地方不直接碰 PTT 的 WebSocket
 - 持久狀態只在 Postgres 的 `MailRequest` 與 `PttAccount`；Redis 每次開機都會 flush，BullMQ job 只是觸發器，啟動時 `recoverInFlight` 依資料庫重新入列或標記未知
 - `mail-queue` 以 `attempts: 1`、worker 併發 1、每 5 秒 1 個 job 執行 `send` 與 `verify`，避免重複登入與帳號被鎖
+- `loginGate` 讓同一個 PTT 帳號每 3 分鐘最多登入一次：PTT 的 DDoS/BOT 偵測會暫停短時間內反覆登入的帳號，且暫停期間重連會延長；間隔未到的 job 不改狀態，由 worker 以 `moveToDelayed` 延後，不計入 attempts
 - 同一封信最多寄出一次：claim 在 Postgres 交易內原子完成，只有擁有者能領取，且受每日上限與每封信 3 次嘗試的限制
 - 密碼只以密文存放與傳遞（job payload 只含密文），解密後的明文只存在於呼叫 PTT 客戶端的區域變數，不寫 log
 - 功能由 `config.mail.enabled` 控制，需同時設定 `PTT_ENCRYPT_KEY` 與 `TELEGRAM_WEBHOOK_SECRET`

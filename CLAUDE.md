@@ -63,14 +63,14 @@ Scheduler (cron) → dispatchWorker → crawlerWorker → matcherWorker → noti
                         ↕                 ↕
                    CircuitBreaker ←── RoundTracker ──→ AlertAggregator
 
-mail button / 綁定PTT → mail-queue → mailWorker → PTT terminal (WebSocket)
+mail button / 綁定PTT → mail-queue → mailWorker → loginGate → PTT terminal (WebSocket)
 ```
 
 - **PostgreSQL**: source of truth (users, subscriptions, articles, PTT accounts, mail requests)
-- **Redis**: read cache (subscriptions) + article tracking + BullMQ queues
+- **Redis**: read cache (subscriptions) + article tracking + BullMQ queues + PTT login gate
 - **CircuitBreaker**: PTT 故障時熔斷（CLOSED → OPEN → HALF_OPEN → CLOSED）
 - **AlertAggregator**: 錯誤告警聚合，避免通知轟炸（NORMAL → ALERTING → NORMAL）；錯誤先經 `errorClassifier` 粗分類（5xx/4xx/逾時/解析/其他），故障期間每 30 分鐘節流進度告警，恢復時送含問題分布的報告
-- **Mail queue**: `mail-queue`（`send` 寄信、`verify` 驗證綁定）由 `mailWorker` 以併發 1、每 5 秒 1 個 job 執行，`attempts: 1` 不自動重試。持久狀態只在 Postgres 的 `MailRequest`（claim 在交易內原子完成，一封信最多寄出一次），Redis 被 flush 時由啟動的 `recoverInFlight` 復原；密碼只以 AES-256-GCM 密文存放與傳遞。需同時設定 `PTT_ENCRYPT_KEY` 與 `TELEGRAM_WEBHOOK_SECRET` 才啟用。見 `docs/mail-flow.md`
+- **Mail queue**: `mail-queue`（`send` 寄信、`verify` 驗證綁定）由 `mailWorker` 以併發 1、每 5 秒 1 個 job 執行，`attempts: 1` 不自動重試；`loginGate` 讓同一個 PTT 帳號每 3 分鐘最多登入一次（PTT 的 DDoS/BOT 偵測會暫停反覆登入的帳號），間隔未到的 job 以 `moveToDelayed` + `DelayedError` 延後。持久狀態只在 Postgres 的 `MailRequest`（claim 在交易內原子完成，一封信最多寄出一次），Redis 被 flush 時由啟動的 `recoverInFlight` 復原；密碼只以 AES-256-GCM 密文存放與傳遞。需同時設定 `PTT_ENCRYPT_KEY` 與 `TELEGRAM_WEBHOOK_SECRET` 才啟用。見 `docs/mail-flow.md`
 - Startup 時 `syncSubscriptions()` 載入訂閱，`seedArticleCache()` 從 DB 回填 24h 內文章至 Redis
 - 爬蟲和比對在 hot path 中完全從 Redis 讀取，零 DB 查詢
 
@@ -84,6 +84,7 @@ mail button / 綁定PTT → mail-queue → mailWorker → PTT terminal (WebSocke
 | `board:latest` | HASH | Latest article timestamp per board (field=board) |
 | `active:articles` | ZSET | Active articles in 24h window (score=timestamp, member=`{board}:{code}`) |
 | `mail:pending:<platformUserId>` | STRING | Pending multi-step input (bind ID, bind password, reply text) as JSON, never the password; TTL 300s, cleared by any recognised command |
+| `mail:login:<pttId lower case>` | STRING | Login gate of one PTT account: set NX with PX 180000 when a mail or verify job logs in; PX 600000 after PTT suspended the account |
 | `bull:{queue}:*` | mixed | BullMQ jobs/state — finalized completed/failed records pruned by `removeOnComplete`/`removeOnFail`. Scheduler / repeatable / delayed metadata is **not** capped by retention; cleared only by startup `flushdb`. See `docs/maintenance.md`. |
 
 App db is configurable via `REDIS_DB` env var (default 0, validated 0-15). On startup `flushdb` (NOT `flushall`) clears only this db so other services on the same Redis instance are not affected.

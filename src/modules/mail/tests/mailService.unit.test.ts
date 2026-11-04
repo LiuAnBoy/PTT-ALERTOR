@@ -10,6 +10,7 @@ import { ARTICLE_DELETED, fetchDetail } from "../../board/services/detailFetcher
 import { findSubscription } from "../../user/repositories/subscriptionRepository";
 import * as mailRequests from "../repositories/mailRequestRepository";
 import * as pttAccounts from "../repositories/pttAccountRepository";
+import { holdLogins, reserveLogin } from "../services/loginGate";
 import {
   buildMail,
   describeRequestOutcome,
@@ -77,6 +78,10 @@ jest.mock("../services/pttTerminal", () => ({
   sendPttMail: jest.fn(),
   verifyPttLogin: jest.fn(),
 }));
+jest.mock("../services/loginGate", () => ({
+  reserveLogin: jest.fn(),
+  holdLogins: jest.fn(),
+}));
 jest.mock("../workers/mailQueue", () => ({
   SEND_JOB: "send",
   VERIFY_JOB: "verify",
@@ -105,6 +110,8 @@ const mockSend = sendPttMail as jest.Mock;
 const mockVerify = verifyPttLogin as jest.Mock;
 const mockFetchDetail = fetchDetail as jest.Mock;
 const mockAdd = mailQueue.add as jest.Mock;
+const mockReserve = reserveLogin as jest.Mock;
+const mockHold = holdLogins as jest.Mock;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -166,6 +173,7 @@ function loggedText(): string {
 
 beforeEach(() => {
   jest.resetAllMocks();
+  mockReserve.mockResolvedValue(0);
   repo.markSending.mockResolvedValue(true);
   repo.markFailed.mockResolvedValue(true);
   repo.markUnknown.mockResolvedValue(true);
@@ -455,7 +463,11 @@ describe("executeSendJob", () => {
   });
 
   it("survives getMailRequest throwing: marks FAILED and reports when the row can be read again", async () => {
-    repo.getMailRequest.mockRejectedValueOnce(new Error("db down")).mockResolvedValue(request());
+    // The login gate reads the row first; the read that fails is startSend's.
+    repo.getMailRequest
+      .mockResolvedValueOnce(request())
+      .mockRejectedValueOnce(new Error("db down"))
+      .mockResolvedValue(request());
     await executeSendJob("req-1");
     expect(mockSend).not.toHaveBeenCalled();
     expect(repo.markFailed).toHaveBeenCalledWith("req-1", expect.any(String));
@@ -482,6 +494,29 @@ describe("executeSendJob", () => {
     mockSend.mockResolvedValue({ outcome: "not_sent", errorCode: "UnfinishedDraft" });
     await executeSendJob("req-1");
     expect(repo.markFailed).toHaveBeenCalledWith("req-1", expect.stringContaining("草稿"));
+  });
+
+  it("defers without touching the row while the account's login gap runs", async () => {
+    mockReserve.mockResolvedValue(42_000);
+    await expect(executeSendJob("req-1")).resolves.toEqual({ deferMs: 42_000 });
+    expect(mockReserve).toHaveBeenCalledWith("myid");
+    expect(repo.markSending).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("does not reserve a login for a request that will not log in", async () => {
+    repo.getMailRequest.mockResolvedValue(request({ status: "SENT" }));
+    repo.markSending.mockResolvedValue(false);
+    await executeSendJob("req-1");
+    expect(mockReserve).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("holds the account's logins and fails when PTT suspends the login", async () => {
+    mockSend.mockResolvedValue({ outcome: "not_sent", errorCode: "LoginThrottled" });
+    await executeSendJob("req-1");
+    expect(mockHold).toHaveBeenCalledWith("myid");
+    expect(repo.markFailed).toHaveBeenCalledWith("req-1", expect.stringContaining("太頻繁"));
   });
 
   it("maps too many PTT sessions to FAILED with the log-out advice", async () => {
@@ -518,6 +553,20 @@ describe("executeVerifyJob", () => {
     chatId: "chat-1",
     pttId: "myid",
     passwordEnc: encryptSecret(PASSWORD, KEY),
+  });
+
+  it("defers without logging in or replying while the login gap runs", async () => {
+    mockReserve.mockResolvedValue(90_000);
+    await expect(executeVerifyJob(data())).resolves.toEqual({ deferMs: 90_000 });
+    expect(mockVerify).not.toHaveBeenCalled();
+    expect(mockAdapter.sendReply).not.toHaveBeenCalled();
+  });
+
+  it("holds the account's logins when PTT suspends the login", async () => {
+    mockVerify.mockRejectedValue(new PttError("LoginThrottled"));
+    await executeVerifyJob(data());
+    expect(mockHold).toHaveBeenCalledWith("myid");
+    expect(mockAdapter.sendReply.mock.calls[0][1]).toContain("太頻繁");
   });
 
   it("saves the account with the ciphertext as given and replies", async () => {
