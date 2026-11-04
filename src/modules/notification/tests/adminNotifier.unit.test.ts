@@ -237,6 +237,19 @@ describe("secret handling", () => {
     mockSendAlert.mockRejectedValue(null);
     await expect(sendAdminAlert("x", "error")).resolves.toBeUndefined();
   });
+
+  it("does not throw when reading the rejected value's name or message throws", async () => {
+    const hostile = new Error("x");
+    Object.defineProperty(hostile, "name", {
+      get() {
+        throw new Error("getter");
+      },
+    });
+    fetchMock.mockRejectedValue(hostile);
+    mockSendAlert.mockRejectedValue(Object.create(null));
+    await expect(sendAdminAlert("x", "error")).resolves.toBeUndefined();
+    expect(mockSendAlert).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("isAdminRouteConfigured", () => {

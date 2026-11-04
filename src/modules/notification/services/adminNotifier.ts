@@ -37,6 +37,34 @@ const KNOWN_NOTIFY_CODES = new Set([
 const KNOWN_FETCH_ERRORS = new Set(["AbortError", "TimeoutError", "TypeError"]);
 
 /**
+ * Name of a caught fetch failure, safe to log: a known fetch error name, else "UnknownError".
+ * Never throws, even when reading the name does.
+ * @param err - The caught value.
+ * @returns The name to log.
+ */
+function fetchErrorName(err: unknown): string {
+  try {
+    return err instanceof Error && KNOWN_FETCH_ERRORS.has(err.name) ? err.name : "UnknownError";
+  } catch {
+    return "UnknownError";
+  }
+}
+
+/**
+ * Message of a caught direct-route failure for the log. Never throws, even when reading the
+ * message or converting the value to a string does.
+ * @param err - The caught value.
+ * @returns The message to log.
+ */
+function directErrorMessage(err: unknown): string {
+  try {
+    return err instanceof Error ? err.message : String(err);
+  } catch {
+    return "unprintable error";
+  }
+}
+
+/**
  * Remove the leading emoji (with a variation selector) and the whitespace after it.
  * notify_service prefixes its own level emoji, so the Service Manager route drops the text's own.
  * @param text - Alert text, possibly starting with an emoji.
@@ -90,9 +118,7 @@ async function sendViaServiceManager(text: string, level: AdminAlertLevel): Prom
     logger.error(`Admin alert via Service Manager failed: status=${res.status} code=${code}`);
     return false;
   } catch (err) {
-    const name =
-      err instanceof Error && KNOWN_FETCH_ERRORS.has(err.name) ? err.name : "UnknownError";
-    logger.error(`Admin alert via Service Manager failed: ${name}`);
+    logger.error(`Admin alert via Service Manager failed: ${fetchErrorName(err)}`);
     return false;
   }
 }
@@ -114,6 +140,6 @@ export async function sendAdminAlert(text: string, level: AdminAlertLevel): Prom
   try {
     await getAdapter("TELEGRAM").sendAlert(chatId, text);
   } catch (err) {
-    logger.error(`Failed to send admin alert: ${err instanceof Error ? err.message : String(err)}`);
+    logger.error(`Failed to send admin alert: ${directErrorMessage(err)}`);
   }
 }
