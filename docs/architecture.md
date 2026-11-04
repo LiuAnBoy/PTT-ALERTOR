@@ -54,7 +54,7 @@
 ```
 src/
 ├── core/                     # 共享基礎設施
-│   ├── config.ts             # 集中式環境變數設定 (dotenv)，含 config.mail
+│   ├── config.ts             # 集中式環境變數設定 (dotenv)，含 config.mail、config.notify
 │   ├── crypto.ts             # AES-256-GCM 加解密 (encryptSecret / decryptSecret)
 │   ├── logger.ts             # Pino 日誌器，格式統一
 │   ├── prisma.ts             # Prisma client 單例 (透過 Proxy 延遲初始化)
@@ -105,7 +105,8 @@ src/
 │   │
 │   ├── notification/         # 推播通知派發
 │   │   ├── services/
-│   │   │   └── notifierService.ts  # 透過註冊表進行多平台通知，附寄信按鈕
+│   │   │   ├── notifierService.ts  # 透過註冊表進行多平台通知，附寄信按鈕
+│   │   │   └── adminNotifier.ts    # 管理員告警：優先送 Service Manager 管理頻道，失敗或未設定時直送 ADMIN_TELEGRAM_ID
 │   │   ├── workers/
 │   │   │   └── notifierWorker.ts   # 速率限制發送器 (30 msg/s)
 │   │   └── tests/                  # 單元測試
@@ -131,7 +132,7 @@ src/
 │       ├── services/
 │       │   ├── syncService.ts      # DB → Redis 訂閱同步
 │       │   ├── boardValidator.ts   # PTT 看板存在檢查
-│       │   └── errorLogger.ts      # DB 錯誤日誌 + 管理員告警
+│       │   └── errorLogger.ts      # DB 錯誤日誌 + 管理員告警 (經 adminNotifier 發送)
 │       └── tests/                  # 單元測試
 │
 ├── middlewares/
