@@ -4,7 +4,7 @@ import { createLogger } from "../../../core/logger";
 
 const logger = createLogger("MAIL");
 
-export const PTT_WS_URL = "wss://ws.ptt.cc/bbs/";
+export const PTT_WS_URL = "wss://ws.ptt.cc/bbs";
 export const PTT_WS_ORIGIN = "https://term.ptt.cc";
 
 /** Maximum Big5 byte length PTT accepts for a mail subject. */

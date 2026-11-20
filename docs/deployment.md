@@ -120,7 +120,7 @@ Base image: `node:22-alpine`
 | `NOTIFY_SERVICE_URL` | No | `http://127.0.0.1:5000` | notify_service base URL |
 | `NOTIFY_ADMIN_CHANNEL` | No | `system_admin` | Admin channel slug that receives the alerts |
 
-PTT 寄信功能的部署注意事項：`add_ptt_mail` migration 只新增（`ptt_accounts`、`mail_requests` 兩張表與 `Subscription` 兩個欄位），`./deploy.sh update` 偵測到 migration 變更會自動執行；回滾時對資料庫執行同目錄的 `down.sql`，並刪除 `_prisma_migrations` 中該筆紀錄。寄信功能另需 server 能以 WebSocket 連到 `wss://ws.ptt.cc/bbs/`。流程見 [mail-flow.md](mail-flow.md)。
+PTT 寄信功能的部署注意事項：`add_ptt_mail` migration 只新增（`ptt_accounts`、`mail_requests` 兩張表與 `Subscription` 兩個欄位），`./deploy.sh update` 偵測到 migration 變更會自動執行；回滾時對資料庫執行同目錄的 `down.sql`，並刪除 `_prisma_migrations` 中該筆紀錄。寄信功能另需 server 能以 WebSocket 連到 `wss://ws.ptt.cc/bbs`。流程見 [mail-flow.md](mail-flow.md)。
 
 管理員告警的部署注意事項：
 
